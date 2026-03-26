@@ -100,3 +100,12 @@ def test_personal_agent_memory_crud_and_search(client, user_uuid):
     assert update_response.status_code == status.HTTP_200_OK
     updated = update_response.json()
     assert "mid-century modern" in updated["content"]
+
+    list_response = client.get(
+        "/api/v1/personal-agent/memories",
+        headers={"X-Dev-User-Id": user_uuid},
+    )
+    assert list_response.status_code == status.HTTP_200_OK
+    listed = list_response.json()
+    assert listed["count"] >= 1
+    assert any(item["id"] == memory_id for item in listed["memories"])

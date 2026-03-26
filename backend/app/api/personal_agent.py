@@ -168,6 +168,20 @@ def search_memories(
     }
 
 
+@router.get("/memories")
+def list_memories(
+    include_inactive: bool = Query(default=False),
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    service = PersonalMemoryService(db)
+    results = service.list_memories(owner_id=UUID(current_user_id), include_inactive=include_inactive)
+    return {
+        "count": len(results),
+        "memories": [_serialize_memory(item) for item in results],
+    }
+
+
 @router.patch("/memories/{memory_id}")
 def update_memory(
     memory_id: UUID,
