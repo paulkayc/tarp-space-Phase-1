@@ -11,11 +11,9 @@ Cloud      (APP_ENV=staging | production):
     JWT is validated against the configured provider (Clerk or Supabase).
     The provider decision is recorded in TODO below — update when resolved.
 """
-from fastapi import Depends, Header, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import Header, HTTPException
 
 from app.core.config import settings
-from app.db.session import get_db
 
 
 def _require_dev_user_id(x_dev_user_id: str | None = Header(None)) -> str:

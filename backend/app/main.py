@@ -17,14 +17,25 @@ app = FastAPI(
 
 # ---------------------------------------------------------------------------
 # /api/v1 router — all application endpoints mount here.
-# Individual routers (conversations, mandates, search, etc.) will be included
-# into this router as they are implemented.
 # ---------------------------------------------------------------------------
 api_v1 = APIRouter(prefix="/api/v1")
 
-# TODO: include feature routers as they are built, e.g.:
+# Feature routers — include as implemented
+from app.api.onboarding import router as onboarding_router
+
+api_v1.include_router(onboarding_router)
+
+# TODO: include remaining routers as they are built:
 # from app.api.conversations import router as conversations_router
+# from app.api.mandates import router as mandates_router
+# from app.api.search import router as search_router
+# from app.api.inventory import router as inventory_router
+# from app.api.activity import router as activity_router
 # api_v1.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
+# api_v1.include_router(mandates_router, prefix="/mandates", tags=["mandates"])
+# api_v1.include_router(search_router, tags=["search"])
+# api_v1.include_router(inventory_router, prefix="/inventory", tags=["inventory"])
+# api_v1.include_router(activity_router, tags=["activity"])
 
 app.include_router(api_v1)
 
