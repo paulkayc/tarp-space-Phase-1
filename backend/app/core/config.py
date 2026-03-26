@@ -16,9 +16,21 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql://tarpspace:tarpspace@localhost:5432/tarpspace"
 
-    # Auth (local dev only)
+    # Local dev auth
     dev_auth_token: str = "dev-token-local"
     admin_api_key: str = "admin-local"
+
+    # Cloud auth — Clerk (leave blank for local dev)
+    # TODO: populate when auth provider is finalised.
+    # ARCHITECTURE.md references Supabase; CONTRACTS.md references Clerk.
+    # Only one set of keys will be used in production.
+    clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
+
+    # Cloud auth — Supabase alternative (leave blank if using Clerk)
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_role_key: str = ""
 
     # AI / Embedding
     anthropic_api_key: str = ""

@@ -44,14 +44,21 @@ class User(Base):
     location_raw = Column(Text)
     location_geom = Column(Geography(geometry_type="POINT", srid=4326))
 
-    # Dev auth
-    dev_user_id = Column(Text, nullable=False, unique=True)
+    # Auth — provider-neutral identifier.
+    # Dev: holds X-Dev-User-Id header value.
+    # Cloud: holds auth provider UUID (Clerk sub / Supabase UUID).
+    external_user_id = Column(Text, nullable=False, unique=True)
+    # Clerk-format ID (user_xxxxx). Null in local dev; set via webhook on cloud.
+    # Rename to supabase_user_id in a future migration if Supabase is chosen.
+    clerk_id = Column(Text, unique=True)
 
     # Persona JSONB blob
     persona = Column(MutableDict.as_mutable(JSONB), nullable=False, default=dict)
 
     # Onboarding state
     onboarding_completed_at = Column(TIMESTAMP(timezone=True))
+    # Identity verification timestamp. Null in local dev; set by auth provider.
+    verified_at = Column(TIMESTAMP(timezone=True))
 
     # Agent defaults
     autonomy_default = Column(
