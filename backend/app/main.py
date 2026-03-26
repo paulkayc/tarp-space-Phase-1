@@ -1,9 +1,13 @@
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from sqlalchemy import text
 
-from app.core.config import settings
+from app.api.agents import router as agents_router
+from app.api.conversations import router as conversations_router
+from app.api.mandates import router as mandates_router
+from app.api.users import router as users_router
 from app.db.session import get_engine
 
 logger = structlog.get_logger(__name__)
@@ -15,35 +19,31 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# ---------------------------------------------------------------------------
-# /api/v1 router — all application endpoints mount here.
-# Individual routers (conversations, mandates, search, etc.) will be included
-# into this router as they are implemented.
-# ---------------------------------------------------------------------------
-api_v1 = APIRouter(prefix="/api/v1")
 
-# TODO: include feature routers as they are built, e.g.:
-# from app.api.conversations import router as conversations_router
-# api_v1.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        payload = exc.detail
+    else:
+        payload = {
+            "error": "server_error",
+            "message": str(exc.detail),
+            "details": {},
+        }
+    return JSONResponse(status_code=exc.status_code, content=payload)
+
+
+api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(users_router, prefix="/users", tags=["users"])
+api_v1.include_router(agents_router, prefix="/agents", tags=["agents"])
+api_v1.include_router(mandates_router, prefix="/mandates", tags=["mandates"])
+api_v1.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
 
 app.include_router(api_v1)
 
 
-# ---------------------------------------------------------------------------
-# Health check — public, no auth required (CONTRACTS.md C1.1)
-# ---------------------------------------------------------------------------
 @app.get("/health", tags=["health"])
 async def health_check():
-    """
-    Health check — verifies app is running and database is reachable.
-
-    Response shape per CONTRACTS.md C1.1:
-      { "status": "ok", "db": "ok", "redis": "n/a", "version": "1.0.0" }
-
-    redis is "n/a" in local dev (not in the Phase 1 stack per ARCHITECTURE.md
-    Principle #6). The key is present so Dev B's startup check doesn't break
-    when the response shape is validated client-side.
-    """
     db_status = "ok"
     try:
         engine = get_engine()
