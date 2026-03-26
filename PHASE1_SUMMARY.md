@@ -57,6 +57,10 @@ Coverage included:
 - No frontend UI was added in this phase.
 - This is not the full Personal Agent implementation; it is a scaffold for subsequent phases.
 
+## Local Deploy Notes for Phase 1
+- Phase 1 itself does **not** require new migrations.
+- If you are deploying current code after Phase 2 was merged, you should follow **PHASE2_SUMMARY.md** deployment steps and run migrations before starting normal usage.
+
 ## Test Plan
 
 ### Local Test Command

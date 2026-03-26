@@ -42,3 +42,16 @@ class PersonalAgentTurnResult(BaseModel):
     gaps_remaining: list[str]
     next_gap: str | None = None
     elicitation_complete: bool
+
+
+class PersonalMemoryCreateRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
+    tags: list[str] = Field(default_factory=list)
+    source: str = "explicit"
+    confidence: float = 1.0
+
+
+class PersonalMemoryUpdateRequest(BaseModel):
+    content: str | None = Field(default=None, min_length=1, max_length=1000)
+    tags: list[str] | None = None
+    is_active: bool | None = None

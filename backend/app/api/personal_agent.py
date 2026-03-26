@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.agents.personal_agent.memory.service import PersonalMemoryService
 from app.agents.personal_agent.runtime import PersonalAgentRuntime
 from app.agents.personal_agent.schemas import (
+    PersonalMemoryCreateRequest,
+    PersonalMemoryUpdateRequest,
     PersonalAgentCreateSessionRequest,
     PersonalAgentSendMessageRequest,
 )
-from app.core.auth import get_current_user
-from app.db.models import OnboardingMessage, User
+from app.core.auth import get_current_user, get_current_user_id
+from app.db.models import OnboardingMessage, PersonalMemory, User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -25,6 +28,20 @@ def _serialize_message(message: OnboardingMessage) -> dict:
         "persona_delta": message.persona_delta,
         "completeness_after": float(message.completeness_after or 0.0),
         "created_at": message.created_at,
+    }
+
+
+def _serialize_memory(memory: PersonalMemory) -> dict:
+    return {
+        "id": str(memory.id),
+        "owner_id": str(memory.owner_id),
+        "content": memory.content,
+        "tags": memory.tags or [],
+        "source": memory.source,
+        "confidence": float(memory.confidence or 0.0),
+        "is_active": bool(memory.is_active),
+        "created_at": memory.created_at,
+        "updated_at": memory.updated_at,
     }
 
 
@@ -116,3 +133,56 @@ def send_message(
         "next_gap": next_gap,
         "elicitation_complete": is_complete,
     }
+
+
+@router.post("/memories")
+def add_memory(
+    payload: PersonalMemoryCreateRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    service = PersonalMemoryService(db)
+    memory = service.add_memory(
+        owner_id=UUID(current_user_id),
+        content=payload.content,
+        tags=payload.tags,
+        source=payload.source,
+        confidence=payload.confidence,
+    )
+    return _serialize_memory(memory)
+
+
+@router.get("/memories/search")
+def search_memories(
+    q: str = Query(min_length=1),
+    limit: int = Query(default=5, ge=1, le=20),
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    service = PersonalMemoryService(db)
+    results = service.search_memories(owner_id=UUID(current_user_id), query=q, limit=limit)
+    return {
+        "query": q,
+        "count": len(results),
+        "memories": [_serialize_memory(item) for item in results],
+    }
+
+
+@router.patch("/memories/{memory_id}")
+def update_memory(
+    memory_id: UUID,
+    payload: PersonalMemoryUpdateRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    service = PersonalMemoryService(db)
+    updated = service.update_memory(
+        owner_id=UUID(current_user_id),
+        memory_id=memory_id,
+        content=payload.content,
+        tags=payload.tags,
+        is_active=payload.is_active,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Memory not found"})
+    return _serialize_memory(updated)

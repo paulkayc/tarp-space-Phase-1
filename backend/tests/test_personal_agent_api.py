@@ -46,6 +46,7 @@ def test_personal_agent_send_message_and_memory_question(client, user_uuid):
     assert memory_response.status_code == status.HTTP_200_OK
     memory_turn = memory_response.json()
     assert "remember" in memory_turn["agent_message"]["content"].lower()
+    assert "category: furniture" in memory_turn["agent_message"]["content"].lower()
 
 
 def test_personal_agent_session_isolation(client, user_uuid, other_user_uuid):
@@ -64,3 +65,38 @@ def test_personal_agent_session_isolation(client, user_uuid, other_user_uuid):
         "error": "forbidden",
         "message": "You do not own this conversation",
     }
+
+
+def test_personal_agent_memory_crud_and_search(client, user_uuid):
+    create_response = client.post(
+        "/api/v1/personal-agent/memories",
+        headers={"X-Dev-User-Id": user_uuid},
+        json={
+            "content": "prefers modern style furniture",
+            "tags": ["style", "persona"],
+            "source": "explicit",
+            "confidence": 1.0,
+        },
+    )
+    assert create_response.status_code == status.HTTP_200_OK
+    memory = create_response.json()
+    memory_id = memory["id"]
+
+    search_response = client.get(
+        "/api/v1/personal-agent/memories/search",
+        headers={"X-Dev-User-Id": user_uuid},
+        params={"q": "modern style", "limit": 5},
+    )
+    assert search_response.status_code == status.HTTP_200_OK
+    payload = search_response.json()
+    assert payload["count"] >= 1
+    assert any("modern style furniture" in item["content"] for item in payload["memories"])
+
+    update_response = client.patch(
+        f"/api/v1/personal-agent/memories/{memory_id}",
+        headers={"X-Dev-User-Id": user_uuid},
+        json={"content": "prefers mid-century modern style furniture"},
+    )
+    assert update_response.status_code == status.HTTP_200_OK
+    updated = update_response.json()
+    assert "mid-century modern" in updated["content"]

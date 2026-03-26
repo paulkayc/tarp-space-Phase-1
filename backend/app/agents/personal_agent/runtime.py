@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.agents.personal_agent.memory.service import PersonalMemoryService
 from app.agents.personal_agent.policy import is_memory_question, one_question_guard
 from app.agents.personal_agent.prompt_builder import build_memory_reflection, default_opening_prompt
 from app.core.config import settings
@@ -18,6 +19,7 @@ from app.services.conversation.reflector import build_reflection
 class PersonalAgentRuntime:
     def __init__(self, db: Session):
         self.db = db
+        self.memory_service = PersonalMemoryService(db)
 
     def create_session(self, owner: User, opening_message: str | None = None) -> tuple[OnboardingSession, OnboardingMessage]:
         now = datetime.now(timezone.utc)
@@ -102,12 +104,18 @@ class PersonalAgentRuntime:
             merged_persona = existing_persona
             completeness_score = compute_onboarding_completeness(merged_persona)
             gap_info = analyze_gaps(merged_persona)
-            agent_text = build_memory_reflection(merged_persona)
+            memory_hits = self.memory_service.search_memories(owner.id, "preferences", limit=5)
+            if memory_hits:
+                rendered = "; ".join([item.content for item in memory_hits])
+                agent_text = f"Here's what I remember from memory: {rendered}."
+            else:
+                agent_text = build_memory_reflection(merged_persona)
             is_complete = completeness_score >= settings.onboarding_completeness_threshold
         else:
             persona_delta, mandate_delta = extract_persona_and_mandate_delta(content, existing_persona)
             merged_persona = self._merge_persona(existing_persona, persona_delta)
             owner.persona = merged_persona
+            self._persist_persona_memories(owner.id, persona_delta)
             completeness_score = compute_onboarding_completeness(merged_persona)
             gap_info = analyze_gaps(merged_persona)
             is_complete = completeness_score >= settings.onboarding_completeness_threshold
@@ -156,3 +164,19 @@ class PersonalAgentRuntime:
             gap_info["next_gap"],
             is_complete,
         )
+
+    def _persist_persona_memories(self, owner_id: UUID, persona_delta: dict) -> None:
+        if not persona_delta:
+            return
+
+        for key, value in persona_delta.items():
+            if value in (None, "", [], {}):
+                continue
+            content = f"{key}: {value}"
+            self.memory_service.add_memory(
+                owner_id=owner_id,
+                content=content,
+                tags=[key, "persona", "preferences"],
+                source="inferred",
+                confidence=0.8,
+            )
