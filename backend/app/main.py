@@ -20,9 +20,11 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 api_v1 = APIRouter(prefix="/api/v1")
 
-# Feature routers — include as implemented
+from app.api.users import router as users_router, agents_router
 from app.api.onboarding import router as onboarding_router
 
+api_v1.include_router(users_router)
+api_v1.include_router(agents_router)
 api_v1.include_router(onboarding_router)
 
 # TODO: include remaining routers as they are built:
@@ -31,11 +33,6 @@ api_v1.include_router(onboarding_router)
 # from app.api.search import router as search_router
 # from app.api.inventory import router as inventory_router
 # from app.api.activity import router as activity_router
-# api_v1.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
-# api_v1.include_router(mandates_router, prefix="/mandates", tags=["mandates"])
-# api_v1.include_router(search_router, tags=["search"])
-# api_v1.include_router(inventory_router, prefix="/inventory", tags=["inventory"])
-# api_v1.include_router(activity_router, tags=["activity"])
 
 app.include_router(api_v1)
 
@@ -51,9 +48,7 @@ async def health_check():
     Response shape per CONTRACTS.md C1.1:
       { "status": "ok", "db": "ok", "redis": "n/a", "version": "1.0.0" }
 
-    redis is "n/a" in local dev (not in the Phase 1 stack per ARCHITECTURE.md
-    Principle #6). The key is present so Dev B's startup check doesn't break
-    when the response shape is validated client-side.
+    redis is "n/a" in local dev (not in Phase 1 stack per ARCHITECTURE.md).
     """
     db_status = "ok"
     try:

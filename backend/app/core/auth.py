@@ -1,83 +1,92 @@
 """
-Auth abstraction — swappable between local dev and cloud JWT.
+Dev auth — local development only.
 
-Local dev  (APP_ENV=development):
-    Pass X-Dev-User-Id: <any-string> header.
-    No token validation. Trusts the caller completely.
-    Never use this mode outside a local network.
+Every protected request must include: X-Dev-User-Id: <uuid-v4>
+The UUID value IS the owner_id — no lookup, no token validation.
 
-Cloud      (APP_ENV=staging | production):
-    Pass Authorization: Bearer <jwt>.
-    JWT is validated against the configured provider (Clerk or Supabase).
-    The provider decision is recorded in TODO below — update when resolved.
+Errors:
+  - Header missing  → 401 {"error": "unauthorized", "message": "X-Dev-User-Id header required"}
+  - Not a valid UUID → 401 {"error": "unauthorized", "message": "X-Dev-User-Id must be a valid UUID"}
 """
-from fastapi import Header, HTTPException
+from __future__ import annotations
 
-from app.core.config import settings
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import Depends, Header, HTTPException
+from sqlalchemy.orm import Session
+
+from app.db.models import User
+from app.db.session import get_db
 
 
-def _require_dev_user_id(x_dev_user_id: str | None = Header(None)) -> str:
-    """Extract and require X-Dev-User-Id header in development mode."""
+def get_current_owner_id(
+    x_dev_user_id: str | None = Header(None),
+) -> uuid.UUID:
+    """
+    FastAPI dependency — extracts and validates X-Dev-User-Id header.
+
+    Returns a UUID object. Raises 401 if missing or not a valid UUID v4.
+    """
     if not x_dev_user_id:
         raise HTTPException(
             status_code=401,
             detail={
                 "error": "unauthorized",
-                "message": "X-Dev-User-Id header is required in development mode",
-                "details": {"header": "X-Dev-User-Id"},
+                "message": "X-Dev-User-Id header required",
             },
         )
-    return x_dev_user_id
-
-
-def _require_jwt(authorization: str | None = Header(None)) -> str:
-    """Validate a Bearer JWT and return the provider user ID.
-
-    TODO: implement once auth provider is chosen.
-          ARCHITECTURE.md references Supabase; CONTRACTS.md references Clerk.
-          Resolve this conflict before implementing cloud auth.
-
-    Implementation steps (when provider is chosen):
-      1. Parse 'Bearer <token>' from authorization header
-      2. Verify JWT signature using provider's public keys
-      3. Extract the 'sub' claim (provider user UUID)
-      4. Return the sub claim — it maps to users.clerk_id or users.supabase_user_id
-    """
-    if not authorization or not authorization.startswith("Bearer "):
+    try:
+        uid = uuid.UUID(x_dev_user_id)
+        if uid.version != 4:
+            raise ValueError("not v4")
+    except (ValueError, AttributeError):
         raise HTTPException(
             status_code=401,
             detail={
                 "error": "unauthorized",
-                "message": "Valid JWT required — Authorization: Bearer <token>",
-                "details": {},
+                "message": "X-Dev-User-Id must be a valid UUID",
             },
         )
-    # TODO: replace stub with real JWT validation
-    raise HTTPException(
-        status_code=501,
-        detail={
-            "error": "server_error",
-            "message": "Cloud JWT auth not yet implemented. Set APP_ENV=development for local use.",
-            "details": {},
-        },
-    )
+    return uid
 
 
+def get_or_create_user(
+    owner_id: uuid.UUID = Depends(get_current_owner_id),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    FastAPI dependency — look up or create the User row for owner_id.
+
+    On first request with a new UUID, auto-creates:
+      external_user_id = str(owner_id)
+      display_name     = "User <first-8-chars>"
+      persona          = {}
+      onboarding_completed_at = null
+
+    Any UUID = valid user. Zero signup friction in local dev.
+    """
+    owner_str = str(owner_id)
+    user = db.query(User).filter(User.external_user_id == owner_str).first()
+    if user is None:
+        now = datetime.now(timezone.utc)
+        user = User(
+            external_user_id=owner_str,
+            display_name=f"User {owner_str[:8]}",
+            persona={},
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return user
+
+
+# Backward-compatibility alias used by stub routers (conversations, mandates, etc.)
+# until they are fully implemented with get_or_create_user.
 def get_current_user_id(
-    x_dev_user_id: str | None = Header(None),
-    authorization: str | None = Header(None),
+    owner_id: uuid.UUID = Depends(get_current_owner_id),
 ) -> str:
-    """
-    FastAPI dependency — returns the authenticated user's external_user_id.
-
-    In development: reads X-Dev-User-Id header directly.
-    In cloud:       validates Authorization: Bearer <jwt> and extracts sub claim.
-
-    Usage in routes:
-        @router.get("/example")
-        def example(owner_id: str = Depends(get_current_user_id)):
-            ...
-    """
-    if settings.app_env == "development":
-        return _require_dev_user_id(x_dev_user_id)
-    return _require_jwt(authorization)
+    """Returns external_user_id as a string. Prefer get_or_create_user in new code."""
+    return str(owner_id)

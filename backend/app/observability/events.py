@@ -1,19 +1,81 @@
 """
-Structured event logger — ARCHITECTURE.md Section 10
+Central event emitter — ARCHITECTURE.md Section 10.
 
-All events are emitted as structured JSON to stdout AND persisted to activity_log.
-No silent failures: if an event cannot be logged, the operation raises an error.
+emit_event(event_type, payload, owner_id, mandate_id, db)
 
-Event types (from ARCHITECTURE.md Section 10):
-  mandate_created       owner_id, mandate_id, vertical, completeness_score, autonomy_level
-  mandate_updated       mandate_id, field_changed, old_value, new_value, source
-  extraction_completed  mandate_id, message_id, fields_extracted, fields_remaining, completeness_score, latency_ms
-  mandate_confirmed     mandate_id, completeness_score, version, confirmed_at
-  search_started        mandate_id, mandate_version, search_id
-  privacy_gate_decision mandate_id, field, action, rule_applied
-  search_completed      search_id, candidate_count_pre_filter, candidate_count_post_filter, top_score, latency_ms
-  escalation_triggered  search_id, result_id, listing_id, threshold_delta, question_text
-  signal_received       owner_id, search_result_id, signal_type, reason, mandate_delta_applied
-  mandate_refined       mandate_id, field_changed, trigger_signal_id, old_value, new_value
+Two outputs on every call:
+  1. structlog JSON line to stdout
+  2. INSERT into activity_log (when db session provided)
+
+Never raises. DB failures are caught and logged to stdout so observability
+never blocks the request path.
+
+Event types used in onboarding:
+  persona_created   — first write to an empty persona
+  persona_updated   — every save_persona_delta call
+  onboarding_completed — session completes or skips
 """
-# TODO: implement in Phase 1 observability sprint
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+import structlog
+from sqlalchemy.orm import Session
+
+from app.db.models import ActivityLog
+
+logger = structlog.get_logger(__name__)
+
+
+def emit_event(
+    event_type: str,
+    payload: dict,
+    owner_id: uuid.UUID | None = None,
+    mandate_id: uuid.UUID | None = None,
+    db: Session | None = None,
+) -> None:
+    """
+    Emit a structured event to stdout + activity_log.
+
+    Never raises — all errors are caught and logged.
+    """
+    now = datetime.now(timezone.utc)
+
+    # ── 1. Structured log to stdout ──────────────────────────────────────────
+    try:
+        logger.info(
+            event_type,
+            event=event_type,
+            owner_id=str(owner_id) if owner_id is not None else None,
+            mandate_id=str(mandate_id) if mandate_id is not None else None,
+            payload=payload,
+            timestamp=now.isoformat(),
+        )
+    except Exception as exc:  # pragma: no cover
+        print(f"[emit_event] structlog error: {exc}")
+
+    # ── 2. Persist to activity_log ───────────────────────────────────────────
+    if db is None:
+        return
+
+    try:
+        log = ActivityLog(
+            owner_id=owner_id,
+            mandate_id=mandate_id,
+            event_type=event_type,
+            payload=payload,
+            created_at=now,
+        )
+        db.add(log)
+        db.commit()
+    except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.error(
+            "emit_event_db_error",
+            event_type=event_type,
+            error=str(exc),
+        )

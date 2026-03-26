@@ -1,0 +1,250 @@
+{
+  "info": {
+    "name": "Tarp-Space API — Phase 1",
+    "description": "Local dev collection. Set the `dev_user_id` collection variable to any UUID v4 before running.\n\nAll requests automatically include X-Dev-User-Id from the collection variable via the pre-request script.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "dev_user_id",
+      "value": "00000000-0000-0000-0000-000000000000",
+      "description": "Replace with any UUID v4, e.g. from https://www.uuidgenerator.net/",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.request.headers.add({",
+          "  key: 'X-Dev-User-Id',",
+          "  value: pm.collectionVariables.get('dev_user_id')",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "GET /users/me — first call (auto-creates user)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users/me",
+            "description": "First request with a new UUID auto-creates the user row with display_name='User <first-8-chars>' and onboarding_status='account_created'."
+          },
+          "response": [
+            {
+              "name": "200 OK — new user auto-created",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a1b2c3d4-e5f6-4789-abcd-ef1234567890\",\n  \"dev_user_id\": \"a1b2c3d4-e5f6-4789-abcd-ef1234567890\",\n  \"email\": null,\n  \"display_name\": \"User a1b2c3d4\",\n  \"phone\": null,\n  \"sex\": null,\n  \"location_raw\": null,\n  \"onboarding_completed_at\": null,\n  \"onboarding_status\": \"account_created\",\n  \"persona_completeness\": 0.0,\n  \"created_at\": \"2026-03-26T10:00:00Z\",\n  \"updated_at\": \"2026-03-26T10:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "PATCH /users/me — update display_name",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base_url}}/users/me",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Alex\"\n}"
+            },
+            "description": "Update one or more of: display_name, phone (E.164 required), email."
+          },
+          "response": [
+            {
+              "name": "200 OK — updated user",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a1b2c3d4-e5f6-4789-abcd-ef1234567890\",\n  \"dev_user_id\": \"a1b2c3d4-e5f6-4789-abcd-ef1234567890\",\n  \"email\": null,\n  \"display_name\": \"Alex\",\n  \"phone\": null,\n  \"sex\": null,\n  \"location_raw\": null,\n  \"onboarding_completed_at\": null,\n  \"onboarding_status\": \"account_created\",\n  \"persona_completeness\": 0.0,\n  \"created_at\": \"2026-03-26T10:00:00Z\",\n  \"updated_at\": \"2026-03-26T10:01:00Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "item": [
+        {
+          "name": "GET /agents/me",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/agents/me",
+            "description": "Returns agent status. Phase 1: status=inactive until a mandate has is_active=true."
+          },
+          "response": [
+            {
+              "name": "200 OK — agent status",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a1b2c3d4-e5f6-4789-abcd-ef1234567890\",\n  \"owner_id\": \"a1b2c3d4-e5f6-4789-abcd-ef1234567890\",\n  \"status\": \"inactive\",\n  \"reputation_score\": 0.5,\n  \"active_mandate_count\": 0,\n  \"completed_negotiation_count\": 0,\n  \"created_at\": \"2026-03-26T10:00:00Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Onboarding",
+      "item": [
+        {
+          "name": "POST /onboarding/message — first message",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/onboarding/message",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"I'm Alex in Montrose\"\n}"
+            },
+            "description": "First user message. The extractor pulls display_name and neighborhood. The gap analyzer asks the next question."
+          },
+          "response": [
+            {
+              "name": "200 OK — gap question returned",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"agent_message\": \"Nice to meet you Alex! Do you have any pets?\",\n  \"persona_delta\": {\n    \"identity\": { \"display_name\": \"Alex\" },\n    \"location\": { \"neighborhood\": \"Montrose\" }\n  },\n  \"completeness_score\": 0.45,\n  \"onboarding_complete\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /onboarding/message — follow-up answer",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/onboarding/message",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Yes, I have a dog. I live in an apartment and love mid-century modern furniture.\"\n}"
+            },
+            "description": "Follow-up answer that extracts has_pets, home_type, and style_affinities."
+          },
+          "response": [
+            {
+              "name": "200 OK — next gap question",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"agent_message\": \"Great! What's your typical budget when shopping for furniture?\",\n  \"persona_delta\": {\n    \"lifestyle\": { \"has_pets\": true, \"home_type\": \"apartment\" },\n    \"preferences\": { \"style_affinities\": [\"mid-century modern\"] }\n  },\n  \"completeness_score\": 0.65,\n  \"onboarding_complete\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /onboarding/persona",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/onboarding/persona",
+            "description": "Returns the full persona blob, completeness_score, onboarding_completed_at, and session_status."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"persona\": {\n    \"identity\": { \"display_name\": \"Alex\" },\n    \"location\": { \"neighborhood\": \"Montrose\" },\n    \"lifestyle\": { \"has_pets\": true, \"home_type\": \"apartment\" },\n    \"preferences\": { \"style_affinities\": [\"mid-century modern\"] },\n    \"completeness_score\": 0.65,\n    \"collected_at\": \"2026-03-26T10:05:00Z\"\n  },\n  \"completeness_score\": 0.65,\n  \"onboarding_completed_at\": null,\n  \"session_status\": \"active\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "PATCH /onboarding/persona/fields — update neighborhood",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base_url}}/onboarding/persona/fields",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"location.neighborhood\",\n  \"value\": \"The Heights\"\n}"
+            },
+            "description": "Explicit field update using dot-notation path. Field is tagged source=explicit."
+          },
+          "response": [
+            {
+              "name": "200 OK — field updated",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"persona\": {\n    \"identity\": { \"display_name\": \"Alex\" },\n    \"location\": { \"neighborhood\": \"The Heights\" },\n    \"_meta\": { \"source_flags\": { \"location.neighborhood\": \"explicit\" } },\n    \"completeness_score\": 0.45\n  },\n  \"completeness_score\": 0.45,\n  \"field_updated\": \"location.neighborhood\",\n  \"source\": \"explicit\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /onboarding/skip",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/onboarding/skip",
+            "description": "Marks onboarding as skipped. Sets session.status=skipped and user.onboarding_completed_at=now()."
+          },
+          "response": [
+            {
+              "name": "200 OK — skipped",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"skipped\": true,\n  \"completeness_score\": 0.45\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth errors",
+      "item": [
+        {
+          "name": "GET /users/me — missing header",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users/me",
+            "header": [
+              { "key": "X-Dev-User-Id", "value": "", "disabled": true }
+            ],
+            "description": "Demonstrates 401 when X-Dev-User-Id header is absent. Disable the collection-level pre-request script to test this."
+          },
+          "response": [
+            {
+              "name": "401 — header missing",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"detail\": {\n    \"error\": \"unauthorized\",\n    \"message\": \"X-Dev-User-Id header required\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /users/me — non-UUID header",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users/me",
+            "header": [
+              { "key": "X-Dev-User-Id", "value": "not-a-uuid" }
+            ],
+            "description": "Demonstrates 401 when X-Dev-User-Id is present but not a valid UUID."
+          },
+          "response": [
+            {
+              "name": "401 — invalid UUID",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"detail\": {\n    \"error\": \"unauthorized\",\n    \"message\": \"X-Dev-User-Id must be a valid UUID\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

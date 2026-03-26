@@ -325,14 +325,15 @@ def test_skip_sets_completed_at():
     """POST /onboarding/skip → sets onboarding_completed_at and returns skipped=true."""
     from fastapi.testclient import TestClient
     from app.main import app
-    from app.core.auth import get_current_user_id
+    from app.core.auth import get_or_create_user
     from app.db.session import get_db
 
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_db.query.return_value.filter.return_value.first.return_value = mock_user
+    mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+    mock_db.query.return_value.filter.return_value.first.return_value = None
 
-    app.dependency_overrides[get_current_user_id] = lambda: "dev-user-1"
+    app.dependency_overrides[get_or_create_user] = lambda: mock_user
     app.dependency_overrides[get_db] = lambda: mock_db
 
     client = TestClient(app)
@@ -352,10 +353,11 @@ def test_persona_patch_dot_notation():
     """PATCH /onboarding/persona/fields with dot-notation path updates nested field."""
     from fastapi.testclient import TestClient
     from app.main import app
-    from app.core.auth import get_current_user_id
+    from app.core.auth import get_or_create_user
     from app.db.session import get_db
 
     mock_user = _make_mock_user(persona={"identity": {"display_name": "Alex"}})
+    mock_user.external_user_id = "00000000-0000-0000-0000-000000000001"
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = mock_user
 
@@ -367,7 +369,7 @@ def test_persona_patch_dot_notation():
         "collected_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    app.dependency_overrides[get_current_user_id] = lambda: "dev-user-1"
+    app.dependency_overrides[get_or_create_user] = lambda: mock_user
     app.dependency_overrides[get_db] = lambda: mock_db
 
     with patch(
@@ -406,14 +408,17 @@ def test_full_onboarding_flow_reaches_completion():
 
     from fastapi.testclient import TestClient
     from app.main import app
-    from app.core.auth import get_current_user_id
+    from app.core.auth import get_or_create_user
     from app.db.session import get_db
 
     mock_user = _make_mock_user(persona=complete_persona)
+    mock_user.external_user_id = "00000000-0000-0000-0000-000000000001"
     mock_db = MagicMock()
-    mock_db.query.return_value.filter.return_value.first.return_value = mock_user
+    # Active session query returns None → new session created
+    mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+    mock_db.query.return_value.filter.return_value.first.return_value = None
 
-    app.dependency_overrides[get_current_user_id] = lambda: "dev-user-1"
+    app.dependency_overrides[get_or_create_user] = lambda: mock_user
     app.dependency_overrides[get_db] = lambda: mock_db
 
     # Extractor returns empty (all fields filled), reflector returns summary
@@ -423,6 +428,7 @@ def test_full_onboarding_flow_reaches_completion():
             "app.api.onboarding.generate_completion_summary",
             return_value="Great, you're all set!",
         ),
+        patch("app.api.onboarding.emit_event"),
     ):
         client = TestClient(app)
         response = client.post(
