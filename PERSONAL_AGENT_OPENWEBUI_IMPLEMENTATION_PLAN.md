@@ -372,3 +372,83 @@ Contract rules:
 - Full plugin marketplace
 - Generic multi-workspace admin parity
 - Agent-to-agent network protocol (Phase 2 concern)
+
+---
+
+## 12) Detailed Sequence Diagram — Personal AI Agent Orchestrator (End-to-End)
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor User
+  participant FE as Frontend (Web/Mobile App)
+  participant API as API Gateway / Backend Server
+  participant AUTH as Authentication Service
+  participant CONV as Conversation Service
+  participant MEM as Memory Service
+  participant VDB as Vector Database
+  participant ORCH as Orchestrator / Agent Controller
+  participant PB as Prompt Builder
+  participant LLM as LLM Provider
+  participant TOOL as Tool/Function Calling Layer
+  participant POST as Response Post-Processor
+  participant DB as Database
+
+  User->>FE: Send chat message
+  FE->>API: POST /personal-agent/message {message, session_id}
+  API->>AUTH: Validate JWT/session
+  AUTH-->>API: Auth result (owner_id, scopes)
+
+  alt Auth invalid
+    API-->>FE: 401/403 error response
+    FE-->>User: Show auth error
+  else Auth valid
+    API->>DB: Log inbound message (raw + metadata)
+    API->>CONV: Get or create conversation state
+    CONV-->>API: conversation_id + recent history
+
+    API->>MEM: Retrieve user memory/persona snippets
+    MEM-->>API: Memory set (preferences, prior signals)
+    Note over MEM,API: Memory is non-authoritative personalization context only.
+
+    API->>VDB: Semantic search for relevant prior context
+    VDB-->>API: Top-k contextual chunks
+    Note over VDB,API: Vector recall augments context (past chats, policy docs, accepted patterns).
+
+    API->>ORCH: Hand off request + history + memory + retrieved context
+    ORCH->>ORCH: Decide plan\n- include/exclude context\n- whether tools are required\n- response strategy
+
+    ORCH->>PB: Build prompt inputs (system + rules + memory + context + user message)
+    PB-->>ORCH: Final prompt payload
+    Note over PB,ORCH: Prompt composition enforces policy templates, tone, and one-question/gap logic.
+
+    ORCH->>LLM: Chat completion request (prompt + tool schema)
+    LLM-->>ORCH: Model output (direct answer OR tool call request)
+
+    alt LLM requests tool/function call
+      ORCH->>TOOL: Execute tool call(s) with validated args
+      TOOL->>DB: Persist tool execution audit/event
+      TOOL-->>ORCH: Tool result payload
+      ORCH->>PB: Rebuild follow-up prompt with tool result
+      PB-->>ORCH: Updated prompt
+      ORCH->>LLM: Second completion with tool result context
+      LLM-->>ORCH: Final model response
+    else Direct response path
+      ORCH->>ORCH: Continue without tool execution
+    end
+
+    ORCH->>POST: Apply post-processing\n(formatting + safety + tone alignment + policy checks)
+    POST-->>ORCH: Final user-facing response
+
+    ORCH->>DB: Store assistant response + metadata\n(prompt refs, context ids, tool ids, latency)
+    ORCH-->>API: Final response envelope
+    API-->>FE: 200 OK + response payload
+    FE-->>User: Render assistant response
+  end
+```
+
+### Engineering Notes
+1. **Conversation state ownership:** `Conversation Service` is the state authority for chat/thread lifecycle; orchestrator is stateless between calls except for request-local planning.
+2. **Memory + vector retrieval separation:** memory service returns durable user-level traits; vector DB returns query-specific semantic context.
+3. **Tool branch behavior:** tool calls are only executed through validated schemas and must be audited before reuse in the second LLM pass.
+4. **Post-processing gate:** final output passes through deterministic formatting/safety/tone policy before persistence and client return.
