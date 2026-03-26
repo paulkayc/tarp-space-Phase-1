@@ -64,6 +64,101 @@ Everything else from Open WebUI is out of scope.
 
 ---
 
+## 2.1) Two-Agent Model (Clear Separation)
+
+Tarp-Space should implement two cooperating agents with distinct responsibilities:
+
+## A) Personal Agent (build first)
+Primary job: **learn the user**, not the marketplace.
+
+Responsibilities:
+1. Onboarding conversation and persona elicitation
+2. Long-term memory creation/update (preferences, constraints, communication style)
+3. Memory summarization for context injection
+4. User profile refinement over time from explicit corrections
+
+Outputs:
+- `persona_memory_profile`
+- `preference_memory_snippets`
+- `persona_confidence_score`
+
+Success criteria:
+- user feels understood,
+- memory is accurate and editable,
+- later interactions require fewer repeated questions.
+
+## B) Mandate Agent (build second)
+Primary job: **fulfill a specific user request** against marketplace supply.
+
+Responsibilities:
+1. Parse request into structured mandate intent
+2. Fill mandate gaps needed for search execution
+3. Trigger marketplace matching/search flow
+4. Return ranked, explained results and escalation prompts
+
+Outputs:
+- `mandate_object` (authoritative in mandate service)
+- `match_results`
+- `refinement_signals`
+
+Success criteria:
+- high match relevance,
+- clear explanations,
+- controlled escalation behavior.
+
+## C) Overlap between agents
+Shared capabilities:
+- conversation runtime
+- tool-calling layer
+- prompt builder
+- response post-processing
+- ACL and audit hooks
+
+Critical boundary:
+- Personal Agent owns **who the user is** (durable persona memory)
+- Mandate Agent owns **what the user wants right now** (task-specific mandate)
+
+---
+
+## 2.2) Build Order (Personal Agent First, Testable in Isolation)
+
+### Phase P1 — Personal Agent only (no mandate search)
+Build and test:
+1. Persona onboarding flow
+2. Memory CRUD + retrieval
+3. Contextual responses using persona memory only
+4. Memory edit/override UX
+
+Do **not** integrate marketplace search yet.
+
+Exit tests:
+- persona extraction accuracy benchmark
+- memory retrieval relevance benchmark
+- user correction round-trip test (edit memory and verify usage next turn)
+
+### Phase P2 — Add Mandate Agent on top
+After P1 passes, add:
+1. Request-intent extraction to mandate schema
+2. Mandate completeness loop
+3. Privacy gate + matching integration
+4. Result explanation + escalation controls
+
+P2 depends on stable P1 memory/context primitives but does not merge authority boundaries.
+
+---
+
+## 2.3) Agent Interaction Flow (High-Level)
+
+1. User talks to **Personal Agent** during onboarding and ongoing profile refinement.
+2. When user submits a concrete marketplace request, Orchestrator invokes **Mandate Agent**.
+3. Mandate Agent receives persona context from Personal Agent memory summary.
+4. Mandate Agent executes request lifecycle (extract → search → explain → refine).
+5. Post-outcome signals update:
+   - mandate state (task-level) in mandate service,
+   - optional durable persona memory (user-level) via Personal Agent memory policy.
+
+---
+
 ## 3) Exact Open WebUI Modules to Extract/Port
 
 > Goal: extract concepts and selected implementation patterns, not wholesale fork.
@@ -364,6 +459,11 @@ Contract rules:
 5. Memory retrieval improves follow-up prompts but never overrides authoritative mandate fields.
 6. All critical actions are auditable in structured logs.
 
+### Additional acceptance criteria for two-agent rollout
+7. Personal Agent can run independently with Mandate Agent disabled.
+8. Mandate Agent consumes persona context but cannot overwrite persona memory directly.
+9. Persona memory updates require Personal Agent policy gate (confidence + user confirmation rules).
+
 ---
 
 ## 11) Non-goals (to prevent scope creep)
@@ -372,6 +472,136 @@ Contract rules:
 - Full plugin marketplace
 - Generic multi-workspace admin parity
 - Agent-to-agent network protocol (Phase 2 concern)
+
+---
+
+## 11.1) Knowledge Retrieval Mini-Service (Detailed Design)
+
+This mini-service provides **small, high-signal contextual retrieval** for the Personal Agent (policy docs, vertical playbooks, negotiation heuristics), without becoming a general-purpose RAG platform.
+
+### Purpose
+The service answers one question:  
+**“What supporting knowledge snippets should be added to this specific user turn?”**
+
+It is intentionally scoped to:
+- improve answer quality and consistency,
+- reduce hallucinations,
+- enforce policy grounding,
+- keep latency predictable.
+
+### What it stores
+1. **Knowledge documents** (markdown/plain text/json)
+   - Example types: furniture buying playbook, escalation policy, explanation style guide.
+2. **Chunks** generated from documents
+   - Sentence/paragraph blocks with overlap.
+3. **Embeddings** for each chunk
+   - Used for semantic retrieval.
+4. **Metadata**
+   - `domain`, `vertical`, `policy_type`, `version`, `status`, `owner_scope`, `created_at`.
+
+### Data model (minimal)
+- `knowledge_documents`
+  - `id`, `title`, `source_type`, `vertical`, `version`, `status`, `tags`, `created_at`, `updated_at`
+- `knowledge_chunks`
+  - `id`, `document_id`, `chunk_text`, `chunk_index`, `token_count`, `embedding`, `metadata`
+- `knowledge_access_rules`
+  - `id`, `document_id`, `role`, `group_id`, `environment`, `can_read`
+
+### Ingestion pipeline
+1. **Document intake**
+   - Admin uploads/updates a knowledge document.
+2. **Normalization**
+   - Strip unsupported markup, normalize whitespace, remove duplicate headings.
+3. **Chunking**
+   - Chunk by semantic boundaries (target ~300–600 tokens, overlap ~50–100 tokens).
+4. **Embedding generation**
+   - Generate vector per chunk using configured embedding model.
+5. **Index write**
+   - Store chunks + embeddings + metadata.
+6. **Version activation**
+   - New version marked `active`; previous version retained for audit/rollback.
+
+### Retrieval request flow (per user message)
+1. Orchestrator sends retrieval request:
+   - `owner_id`, `conversation_id`, `vertical`, `intent_type`, `query_text`, `k`.
+2. Service builds filter set:
+   - active docs only,
+   - matching `vertical` + allowed policy categories,
+   - ACL/role/group constraints.
+3. Semantic search against vector index:
+   - cosine similarity over `knowledge_chunks.embedding`.
+4. Re-rank and cap:
+   - prioritize policy docs over generic tips when confidence is close.
+5. Return top-k snippets with citations:
+   - snippet text + document title + version + score.
+
+### Ranking logic (simple + deterministic)
+`final_score = semantic_similarity * 0.8 + policy_priority * 0.2`
+
+Where:
+- `semantic_similarity` = vector similarity score.
+- `policy_priority` = deterministic boost for high-priority policy classes  
+  (e.g., privacy/safety/escalation docs).
+
+### Prompt integration contract
+Returned snippets are inserted into Prompt Builder as a separate block:
+- `SYSTEM_RULES`
+- `MANDATE_STATE_SUMMARY`
+- `MEMORY_SNIPPETS`
+- `KNOWLEDGE_SNIPPETS`  ← from this service
+- `RECENT_CONVERSATION`
+- `USER_MESSAGE`
+
+This separation ensures knowledge context is distinguishable during debugging/audits.
+
+### Guardrails
+1. **Never authoritative for mandate truth**
+   - Knowledge retrieval can guide wording/strategy, but cannot mutate mandate state directly.
+2. **ACL enforced before retrieval**
+   - No cross-tenant or unauthorized policy leakage.
+3. **Version pinning**
+   - Retrieval responses include doc version for reproducibility.
+4. **Token budget cap**
+   - Hard cap on returned snippet tokens to protect latency/cost.
+5. **Injection resistance**
+   - Retrieved text is wrapped as quoted context and never executed as instructions directly.
+
+### Caching strategy
+- Cache key: `(vertical, intent_type, normalized_query_hash, role/group)` with short TTL.
+- Benefits:
+  - lowers repeated retrieval latency in multi-turn conversations,
+  - reduces embedding/index load.
+- Invalidate cache on document version changes.
+
+### Failure behavior
+If retrieval fails/timeouts:
+1. Return empty snippet set.
+2. Continue orchestration with memory + conversation context only.
+3. Emit `knowledge_retrieval_failed` event with reason/latency.
+
+No hard failure should block user response unless policy requires a specific document.
+
+### API surface (minimal)
+1. `POST /api/v1/knowledge/documents`
+   - create/update document (admin only)
+2. `POST /api/v1/knowledge/reindex/{document_id}`
+   - re-chunk + re-embed + activate version
+3. `POST /api/v1/knowledge/retrieve`
+   - request snippets for a user turn
+4. `GET /api/v1/knowledge/documents/{id}/versions`
+   - audit/debug version history
+
+### Observability events
+- `knowledge_document_ingested`
+- `knowledge_document_activated`
+- `knowledge_retrieval_started`
+- `knowledge_retrieval_completed` (with `k`, latency, score distribution)
+- `knowledge_retrieval_failed`
+
+### Performance targets (Phase 1)
+- p95 retrieval latency: `< 150ms` on small corpus.
+- snippet recall quality: top-3 judged relevant in >80% of eval prompts.
+- zero unauthorized knowledge reads in ACL audit.
 
 ---
 
@@ -452,3 +682,83 @@ sequenceDiagram
 2. **Memory + vector retrieval separation:** memory service returns durable user-level traits; vector DB returns query-specific semantic context.
 3. **Tool branch behavior:** tool calls are only executed through validated schemas and must be audited before reuse in the second LLM pass.
 4. **Post-processing gate:** final output passes through deterministic formatting/safety/tone policy before persistence and client return.
+
+---
+
+## 13) Detailed Implementation Breakdown by Agent
+
+## 13.1 Personal Agent implementation (first milestone)
+
+### Services/components
+- `personal_agent_orchestrator`
+- `memory_service`
+- `knowledge_retrieval_service` (policy/playbook support)
+- `persona_prompt_templates`
+
+### Core endpoints
+- `POST /api/v1/personal-agent/message`
+- `GET /api/v1/personal-agent/memory`
+- `PATCH /api/v1/personal-agent/memory/{memory_id}`
+
+### Test plan (must pass before Mandate Agent starts)
+1. Persona onboarding test corpus (profile extraction quality)
+2. Memory retrieval relevance test
+3. Memory edit consistency test
+4. Latency and token budget test for memory-augmented prompting
+
+## 13.2 Mandate Agent implementation (second milestone)
+
+### Services/components
+- `mandate_agent_orchestrator`
+- `mandate_service` (existing authoritative)
+- `privacy_gate` (existing authoritative)
+- `matching_service` (existing authoritative)
+- `signal_refinement_service` (existing authoritative)
+
+### Core endpoints
+- `POST /api/v1/mandate-agent/message`
+- `POST /api/v1/mandates/{id}/confirm`
+- `POST /api/v1/mandates/{id}/search`
+- `POST /api/v1/mandates/{id}/signals`
+
+### Test plan
+1. Intent extraction to mandate schema test
+2. Completeness loop behavior test
+3. Privacy-gate-before-search enforcement test
+4. Match explanation grounding test
+5. Escalation flow correctness test
+
+## 13.3 Overlap implementation (shared platform layer)
+
+Build once and reuse for both agents:
+- chat runtime + streaming
+- tool registry/dispatcher
+- prompt builder
+- response post-processor
+- ACL + audit logging
+
+This gives fast delivery while preserving clean agent boundaries.
+
+---
+
+## 14) Practical rollout checklist (Personal first, then Mandate)
+
+### Step 1 — Ship Personal Agent beta
+- [ ] Deploy Personal Agent endpoints + UI
+- [ ] Enable memory visibility/edit controls
+- [ ] Run onboarding cohort and collect quality metrics
+
+### Step 2 — Harden Personal Agent
+- [ ] Improve memory ranking/chunking from observed usage
+- [ ] Tune prompt budget and response quality
+- [ ] Lock ACL/audit controls
+
+### Step 3 — Introduce Mandate Agent
+- [ ] Add request-to-mandate extraction flow
+- [ ] Integrate privacy gate + matching
+- [ ] Add result explanation + escalation
+
+### Step 4 — Joint operation
+- [ ] Pass persona summary from Personal Agent to Mandate Agent
+- [ ] Keep mandate and persona updates separate with explicit policies
+- [ ] Validate end-to-end two-agent quality metrics
