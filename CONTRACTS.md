@@ -326,88 +326,167 @@ GET /mandates/{mandate_id}
 
 ---
 
-### C2.4 — Send Elicitation Message
+### C2.4 — Create Onboarding Conversation `[CHANGED - Week 12]`
 
 ```
-POST /mandates/{mandate_id}/message
+POST /conversations
+```
+
+**Request body (optional):**
+```json
+{
+  "opening_message": "Hi, let's get started."
+}
+```
+
+**Response 200:**
+```json
+{
+  "conversation": {
+    "id": "uuid",
+    "status": "active",
+    "created_at": "2026-03-26T01:00:00Z",
+    "last_message_at": "2026-03-26T01:00:00Z",
+    "completed_at": null
+  },
+  "agent_message": {
+    "id": "uuid",
+    "role": "agent",
+    "content": "Hi, I am your Tarp-Space onboarding agent. What are you trying to buy, sell, or find right now?",
+    "persona_delta": null,
+    "completeness_after": 0.0,
+    "created_at": "2026-03-26T01:00:00Z"
+  },
+  "persona": {}
+}
+```
+
+---
+
+### C2.5 — Send Onboarding Message `[CHANGED - Week 12]`
+
+```
+POST /conversations/{conversation_id}/messages
 ```
 
 **Request body:**
 ```json
 {
-  "content": "I'm looking for something around $400 to $600"
+  "content": "I want to buy a sofa in Houston between $400 and $600."
 }
 ```
 
 **Response 200:**
 ```json
 {
+  "conversation": {
+    "id": "uuid",
+    "status": "active",
+    "created_at": "2026-03-26T01:00:00Z",
+    "last_message_at": "2026-03-26T01:01:00Z",
+    "completed_at": null
+  },
+  "user_message": {
+    "id": "uuid",
+    "role": "user",
+    "content": "I want to buy a sofa in Houston between $400 and $600.",
+    "persona_delta": {
+      "intent_type": "buy",
+      "vertical": "goods",
+      "category": "furniture",
+      "budget": { "min": 400, "max": 600 },
+      "location": "Houston"
+    },
+    "completeness_after": 0.7,
+    "created_at": "2026-03-26T01:01:00Z"
+  },
   "agent_message": {
     "id": "uuid",
     "role": "agent",
-    "content": "Got it — budget between $400 and $600. Are you flexible on condition, or do you need it to be in excellent shape?",
-    "dimension": "condition_quality",
-    "created_at": "2026-03-15T14:05:00Z"
+    "content": "What condition is acceptable?",
+    "persona_delta": {
+      "intent_type": "buy",
+      "vertical": "goods",
+      "category": "furniture",
+      "negotiation_range": [{ "dimension": "price", "min": 400, "max": 600 }],
+      "hard_constraints": [{ "field": "location", "value": "Houston" }]
+    },
+    "completeness_after": 0.7,
+    "created_at": "2026-03-26T01:01:00Z"
   },
-  "mandate_updated": {
-    "completeness_score": 0.55,
-    "source_flags": {
-      "budget_price": "explicit"
-    }
+  "persona_delta": {
+    "intent_type": "buy",
+    "vertical": "goods",
+    "category": "furniture",
+    "budget": { "min": 400, "max": 600 },
+    "location": "Houston"
   },
+  "mandate_delta": {
+    "intent_type": "buy",
+    "vertical": "goods",
+    "category": "furniture",
+    "negotiation_range": [{ "dimension": "price", "min": 400, "max": 600 }],
+    "hard_constraints": [{ "field": "location", "value": "Houston" }]
+  },
+  "persona": {
+    "intent_type": "buy",
+    "vertical": "goods",
+    "category": "furniture",
+    "budget": { "min": 400, "max": 600 },
+    "location": "Houston"
+  },
+  "completeness_score": 0.7,
+  "gaps_remaining": ["condition", "timing", "style_preferences", "dealbreakers", "autonomy_level"],
+  "next_gap": "condition",
   "elicitation_complete": false
 }
 ```
 
-**When `elicitation_complete: true`:**
-```json
-{
-  "agent_message": {
-    "id": "uuid",
-    "role": "agent",
-    "content": "Here's what I know about your search. You're looking for a mid-century modern sofa, used condition acceptable, between $400–$600, in the Heights neighborhood of Houston, needed within 2 weeks. Does this look right?",
-    "dimension": "confirmation",
-    "created_at": "2026-03-15T14:10:00Z"
-  },
-  "mandate_updated": {
-    "completeness_score": 0.90
-  },
-  "elicitation_complete": true
-}
-```
-
-**Response 429:** Too many messages (> 30/hour). Retry-After header included.
-
-**Dev B:** Show typing indicator immediately after send. Display `agent_message.content` when response arrives. Update completeness bar using `mandate_updated.completeness_score`.
+**Response 403:** Caller is not owner of conversation.  
+**Response 404:** Conversation not found.
 
 ---
 
-### C2.5 — Get Conversation History
+### C2.5b — Get Onboarding Conversation `[CHANGED - Week 12]`
 
 ```
-GET /mandates/{mandate_id}/conversation
+GET /conversations/{conversation_id}
 ```
 
 **Response 200:**
 ```json
 {
+  "conversation": {
+    "id": "uuid",
+    "status": "completed",
+    "created_at": "2026-03-26T01:00:00Z",
+    "last_message_at": "2026-03-26T01:05:00Z",
+    "completed_at": "2026-03-26T01:05:00Z"
+  },
   "messages": [
     {
       "id": "uuid",
       "role": "agent",
-      "content": "Hi! I'm your Tarp-Space agent. What are you looking to buy, sell, or find today?",
-      "dimension": "intent_type",
-      "created_at": "2026-03-15T14:00:00Z"
+      "content": "Hi, I am your Tarp-Space onboarding agent. What are you trying to buy, sell, or find right now?",
+      "persona_delta": null,
+      "completeness_after": 0.0,
+      "created_at": "2026-03-26T01:00:00Z"
     },
     {
       "id": "uuid",
-      "role": "owner",
-      "content": "I need a sofa",
-      "dimension": null,
-      "created_at": "2026-03-15T14:01:00Z"
+      "role": "user",
+      "content": "I want to buy a sofa in Houston...",
+      "persona_delta": { "intent_type": "buy" },
+      "completeness_after": 0.7,
+      "created_at": "2026-03-26T01:01:00Z"
     }
   ],
-  "total": 12
+  "total": 8,
+  "persona": {
+    "intent_type": "buy",
+    "vertical": "goods",
+    "category": "furniture"
+  }
 }
 ```
 

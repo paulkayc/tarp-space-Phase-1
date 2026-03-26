@@ -336,7 +336,7 @@ class Inventory(Base):
     category = Column(Text, nullable=False)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=False)
-    metadata = Column(JSONB, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     price = Column(Numeric(10, 2), nullable=False)
     price_negotiable = Column(Boolean, nullable=False, default=True)
     location_raw = Column(Text)

@@ -1,0 +1,202 @@
+{
+  "info": {
+    "name": "Tarp-Space Local Dev Auth + Mock Mandates",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Local-only integration contract. Set dev_user_id to any UUID and requests auto-send X-Dev-User-Id."
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1"
+    },
+    {
+      "key": "dev_user_id",
+      "value": "SET-ANY-UUID-HERE-e.g.-11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "key": "mandate_id",
+      "value": ""
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const devUserId = pm.collectionVariables.get('dev_user_id');",
+          "pm.request.headers.upsert({ key: 'X-Dev-User-Id', value: devUserId });"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Users - GET /users/me",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/users/me",
+        "description": "Expected 200:\n{ id, dev_user_id, email, display_name, verified_at, onboarding_status, created_at, updated_at }"
+      },
+      "response": [
+        {
+          "name": "200 Example",
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"id\": \"b8e88c2a-f2c3-47dd-aed1-651478759086\",\n  \"dev_user_id\": \"11111111-1111-1111-1111-111111111111\",\n  \"email\": null,\n  \"display_name\": null,\n  \"verified_at\": null,\n  \"onboarding_status\": \"account_created\",\n  \"created_at\": \"2026-03-25T23:00:00Z\",\n  \"updated_at\": \"2026-03-25T23:00:00Z\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Users - PATCH /users/me",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"display_name\": \"Dev User\",\n  \"phone\": \"+17135550100\"\n}"
+        },
+        "url": "{{base_url}}/users/me",
+        "description": "Expected 200 same shape as GET /users/me.\nExpected 422 for invalid phone:\n{ \"error\": \"validation_error\", \"message\": \"Phone number format invalid\", \"details\": { \"field\": \"phone\", \"expected\": \"E.164 format\" } }"
+      },
+      "response": [
+        {
+          "name": "200 Example",
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"id\": \"b8e88c2a-f2c3-47dd-aed1-651478759086\",\n  \"dev_user_id\": \"11111111-1111-1111-1111-111111111111\",\n  \"email\": null,\n  \"display_name\": \"Dev User\",\n  \"verified_at\": null,\n  \"onboarding_status\": \"account_created\",\n  \"created_at\": \"2026-03-25T23:00:00Z\",\n  \"updated_at\": \"2026-03-25T23:01:00Z\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Agents - GET /agents/me",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/agents/me",
+        "description": "Expected 200:\n{ id, owner_id, status, reputation_score, active_mandate_count, completed_negotiation_count, created_at }"
+      },
+      "response": [
+        {
+          "name": "200 Example",
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"id\": \"b8e88c2a-f2c3-47dd-aed1-651478759086\",\n  \"owner_id\": \"b8e88c2a-f2c3-47dd-aed1-651478759086\",\n  \"status\": \"inactive\",\n  \"reputation_score\": 0.5,\n  \"active_mandate_count\": 0,\n  \"completed_negotiation_count\": 0,\n  \"created_at\": \"2026-03-25T23:00:00Z\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Mandates - GET /mandates",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/mandates",
+        "description": "Expected 200 mock list:\n{ \"mandates\": [], \"next_cursor\": null, \"total\": 0 }"
+      },
+      "response": [
+        {
+          "name": "200 Example",
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"mandates\": [],\n  \"next_cursor\": null,\n  \"total\": 0\n}"
+        }
+      ]
+    },
+    {
+      "name": "Mandates - POST /mandates",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const json = pm.response.json();",
+              "  if (json.id) pm.collectionVariables.set('mandate_id', json.id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/mandates",
+        "description": "Creates a bare draft mandate for the authenticated dev user. Saves mandate_id collection variable on success."
+      },
+      "response": [
+        {
+          "name": "201 Example",
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"id\": \"7e9f7f13-95dc-4a8d-9f85-3032e3ef6f68\",\n  \"owner_id\": \"b8e88c2a-f2c3-47dd-aed1-651478759086\",\n  \"intent_type\": null,\n  \"vertical\": null,\n  \"category\": null,\n  \"description\": null,\n  \"hard_constraints\": [],\n  \"negotiation_range\": [],\n  \"soft_preferences\": [],\n  \"dealbreakers\": [],\n  \"escalation_triggers\": [],\n  \"autonomy_level\": \"escalate_key_points\",\n  \"completeness_score\": 0.0,\n  \"status\": \"draft\",\n  \"version\": 1,\n  \"confirmed_at\": null,\n  \"created_at\": \"2026-03-25T23:02:00Z\",\n  \"updated_at\": \"2026-03-25T23:02:00Z\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Mandates - GET /mandates/{mandate_id}",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/mandates/{{mandate_id}}",
+        "description": "Expected 200 full mandate for owner.\nExpected 403 for different X-Dev-User-Id."
+      },
+      "response": [
+        {
+          "name": "403 Example",
+          "status": "Forbidden",
+          "code": 403,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"error\": \"forbidden\",\n  \"message\": \"You do not own this mandate\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Mandates - POST /mandates/{mandate_id}/confirm",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/mandates/{{mandate_id}}/confirm",
+        "description": "Expected 422 mock validation response for all mandates in this session."
+      },
+      "response": [
+        {
+          "name": "422 Example",
+          "status": "Unprocessable Entity",
+          "code": 422,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"error\": \"validation_error\",\n  \"message\": \"Mandate completeness score too low to confirm\",\n  \"details\": {\n    \"current_score\": 0.0,\n    \"required_score\": 0.7\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Mandates - POST /mandates/{mandate_id}/search",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/mandates/{{mandate_id}}/search",
+        "description": "Expected 200 hardcoded mock search payload for frontend integration."
+      },
+      "response": [
+        {
+          "name": "200 Example",
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"search_id\": \"00000000-0000-0000-0000-000000000001\",\n  \"mandate_version\": 1,\n  \"results\": [\n    {\n      \"listing_id\": \"00000000-0000-0000-0000-000000000002\",\n      \"alignment_score\": 0.91,\n      \"price\": 420.0,\n      \"within_mandate\": true,\n      \"matched_dimensions\": [\"style\", \"condition\", \"location\", \"price\"],\n      \"explanation\": \"Mock result: mid-century sofa, like-new, Montrose, $80 below ceiling.\",\n      \"escalation\": null\n    }\n  ],\n  \"escalations\": [\n    {\n      \"listing_id\": \"00000000-0000-0000-0000-000000000004\",\n      \"alignment_score\": 0.82,\n      \"price\": 560.0,\n      \"within_mandate\": false,\n      \"threshold_delta\": 60.0,\n      \"question\": \"This listing is $60 above your ceiling but matches on style and condition. Want me to explore it?\"\n    }\n  ]\n}"
+        }
+      ]
+    }
+  ]
+}
