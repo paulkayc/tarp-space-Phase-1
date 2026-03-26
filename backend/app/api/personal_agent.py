@@ -186,3 +186,9 @@ def update_memory(
     if updated is None:
         raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Memory not found"})
     return _serialize_memory(updated)
+
+
+@router.get("/tools")
+def list_tools(db: Session = Depends(get_db)):
+    runtime = PersonalAgentRuntime(db)
+    return {"tools": runtime.list_tools(), "count": len(runtime.list_tools())}

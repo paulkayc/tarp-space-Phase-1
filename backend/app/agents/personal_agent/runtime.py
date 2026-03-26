@@ -7,8 +7,10 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.agents.personal_agent.memory.service import PersonalMemoryService
-from app.agents.personal_agent.policy import is_memory_question, one_question_guard
+from app.agents.personal_agent.pipeline import Pipeline, append_action_log, enforce_one_question
+from app.agents.personal_agent.policy import is_memory_question
 from app.agents.personal_agent.prompt_builder import build_memory_reflection, default_opening_prompt
+from app.agents.personal_agent.tools import ToolExecutor, ToolRegistry, register_builtin_tools
 from app.core.config import settings
 from app.db.models import OnboardingMessage, OnboardingSession, User
 from app.services.conversation.extractor import extract_persona_and_mandate_delta
@@ -20,6 +22,11 @@ class PersonalAgentRuntime:
     def __init__(self, db: Session):
         self.db = db
         self.memory_service = PersonalMemoryService(db)
+        self.tool_registry = ToolRegistry()
+        register_builtin_tools(self.tool_registry, self.memory_service)
+        self.tool_executor = ToolExecutor(self.tool_registry)
+        self.pipeline = Pipeline()
+        self.pipeline.add_step(append_action_log)
 
     def create_session(self, owner: User, opening_message: str | None = None) -> tuple[OnboardingSession, OnboardingMessage]:
         now = datetime.now(timezone.utc)
@@ -104,7 +111,9 @@ class PersonalAgentRuntime:
             merged_persona = existing_persona
             completeness_score = compute_onboarding_completeness(merged_persona)
             gap_info = analyze_gaps(merged_persona)
-            memory_hits = self.memory_service.search_memories(owner.id, "preferences", limit=5)
+            memory_hits = self.tool_executor.execute(
+                "memory_search", owner_id=owner.id, query="preferences", limit=5
+            )
             if memory_hits:
                 rendered = "; ".join([item.content for item in memory_hits])
                 agent_text = f"Here's what I remember from memory: {rendered}."
@@ -125,7 +134,8 @@ class PersonalAgentRuntime:
             else:
                 agent_text = gap_info["next_question"] or default_opening_prompt()
 
-        agent_text = one_question_guard(agent_text)
+        agent_text = enforce_one_question(agent_text)
+        self.pipeline.run({"action_message": "turn_processed"})
 
         user_msg = OnboardingMessage(
             session_id=session.id,
@@ -173,10 +183,14 @@ class PersonalAgentRuntime:
             if value in (None, "", [], {}):
                 continue
             content = f"{key}: {value}"
-            self.memory_service.add_memory(
+            self.tool_executor.execute(
+                "memory_add",
                 owner_id=owner_id,
                 content=content,
                 tags=[key, "persona", "preferences"],
                 source="inferred",
                 confidence=0.8,
             )
+
+    def list_tools(self) -> list[dict[str, str]]:
+        return self.tool_registry.list()
