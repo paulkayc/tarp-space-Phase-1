@@ -1,14 +1,15 @@
-version: "3.9"
+
 
 services:
   postgres:
-    image: ankane/pgvector
+    image: postgis/postgis:16-3.4
     ports:
       - "5432:5432"
     environment:
       POSTGRES_USER: tarpspace
       POSTGRES_PASSWORD: tarpspace
       POSTGRES_DB: tarpspace
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,6 +28,7 @@ services:
     env_file: ./backend/.env
     volumes:
       - ./backend:/app
+      - ./db:/db
 
   frontend:
     build: ./frontend
