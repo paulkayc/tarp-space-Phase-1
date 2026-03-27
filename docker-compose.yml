@@ -2,7 +2,9 @@
 
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    # image: pgvector/pgvector:pg16-trixie
+    build: .
+    container_name: tarpspace-postgres
     ports:
       - "5432:5432"
     environment:

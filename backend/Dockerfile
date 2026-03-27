@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir -e .
 COPY . .
 
 # Hot-reload dev server
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-exclude", ".pytest_cache", "--reload-exclude", "__pycache__", "--reload-exclude", "pytest-cache-files-*"]
