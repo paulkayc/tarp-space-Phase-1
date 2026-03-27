@@ -16,7 +16,7 @@ depends_on = None
 def upgrade():
     op.execute(
         """
-        CREATE TABLE personal_memories (
+        CREATE TABLE IF NOT EXISTS personal_memories (
             id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             owner_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             content       TEXT NOT NULL,
@@ -34,7 +34,7 @@ def upgrade():
 
     op.execute(
         """
-        CREATE TABLE personal_memory_events (
+        CREATE TABLE IF NOT EXISTS personal_memory_events (
             id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             memory_id         UUID NOT NULL REFERENCES personal_memories(id) ON DELETE CASCADE,
             owner_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -47,9 +47,13 @@ def upgrade():
         """
     )
 
-    op.execute("CREATE INDEX idx_personal_memories_owner_id ON personal_memories (owner_id)")
-    op.execute("CREATE INDEX idx_personal_memories_owner_updated ON personal_memories (owner_id, updated_at DESC)")
-    op.execute("CREATE INDEX idx_personal_memory_events_memory_id ON personal_memory_events (memory_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_personal_memories_owner_id ON personal_memories (owner_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_personal_memories_owner_updated ON personal_memories (owner_id, updated_at DESC)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_personal_memory_events_memory_id ON personal_memory_events (memory_id)"
+    )
 
 
 def downgrade():
