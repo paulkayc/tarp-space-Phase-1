@@ -1591,11 +1591,158 @@ All events pushed from server to client over the authenticated WebSocket connect
 
 ---
 
+## Personal Agent Contracts — Embedded Runtime [CHANGED - Week 11]
+
+> **Authoritative scope note:** Personal Agent memory snippets are **non-authoritative personalization context** (`authoritative=false`).  
+> Mandate state remains authoritative in mandate tables/services.
+
+### PA.1 — Create Personal Agent Session
+
+```
+POST /api/v1/personal-agent/sessions
+```
+
+**Request body (optional):**
+```json
+{
+  "opening_message": "Optional custom greeting"
+}
+```
+
+**Response 200:**
+```json
+{
+  "conversation": {
+    "id": "uuid",
+    "status": "active",
+    "created_at": "2026-03-26T10:00:00Z",
+    "last_message_at": "2026-03-26T10:00:00Z",
+    "completed_at": null
+  },
+  "agent_message": {
+    "id": "uuid",
+    "role": "agent",
+    "content": "Hi, I am your Personal Agent...",
+    "persona_delta": null,
+    "completeness_after": 0.0,
+    "created_at": "2026-03-26T10:00:00Z"
+  },
+  "persona": {}
+}
+```
+
+### PA.2 — Send Personal Agent Message
+
+```
+POST /api/v1/personal-agent/sessions/{conversation_id}/messages
+```
+
+**Request body:**
+```json
+{
+  "content": "I want a modern sofa in Houston under $900."
+}
+```
+
+**Response 200:** returns user message, agent message, extracted deltas, completeness, and gap state.
+
+### PA.3 — Get Personal Agent Session
+
+```
+GET /api/v1/personal-agent/sessions/{conversation_id}
+```
+
+**Response 200:** conversation metadata + ordered message history + current persona blob.
+
+### PA.4 — Create Personal Memory Snippet (authoritative=false)
+
+```
+POST /api/v1/personal-agent/memories
+```
+
+**Request body:**
+```json
+{
+  "content": "prefers modern style furniture",
+  "tags": ["style", "persona"],
+  "source": "explicit",
+  "confidence": 1.0
+}
+```
+
+**Response 200:** created memory snippet object.
+
+### PA.5 — Search Personal Memories (authoritative=false)
+
+```
+GET /api/v1/personal-agent/memories/search?q=modern%20style&limit=5
+```
+
+**Response 200:**
+```json
+{
+  "query": "modern style",
+  "count": 1,
+  "memories": []
+}
+```
+
+### PA.6 — List Personal Memories (authoritative=false)
+
+```
+GET /api/v1/personal-agent/memories?include_inactive=false
+```
+
+**Response 200:**
+```json
+{
+  "count": 2,
+  "memories": []
+}
+```
+
+### PA.7 — Update Personal Memory Snippet (authoritative=false)
+
+```
+PATCH /api/v1/personal-agent/memories/{memory_id}
+```
+
+**Request body (partial):**
+```json
+{
+  "content": "prefers mid-century modern style furniture",
+  "is_active": true
+}
+```
+
+**Response 404:** `{ "error": "not_found", "message": "Memory not found" }`
+
+### PA.8 — List Runtime Tools
+
+```
+GET /api/v1/personal-agent/tools
+```
+
+**Response 200:**
+```json
+{
+  "count": 3,
+  "tools": [
+    { "name": "memory_add", "description": "..." },
+    { "name": "memory_search", "description": "..." },
+    { "name": "memory_update", "description": "..." }
+  ]
+}
+```
+
+---
+
 ## Contract Change Log
 
 | Date | Contract | Change | Dev A | Dev B |
 |------|----------|--------|-------|-------|
 | March 2026 | All | Initial version | ✅ | ✅ |
+| March 2026 | Personal Agent | Added PA.1–PA.8 endpoints and non-authoritative memory semantics | ✅ | ⏳ |
 
 **Instructions for changes:**
 1. Dev A edits the contract entry and adds `[CHANGED - Week X]` to the section title

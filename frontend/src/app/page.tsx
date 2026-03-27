@@ -5,6 +5,12 @@ export default function Home() {
       <p className="mt-4 text-lg text-gray-600">
         Local marketplace powered by AI agents — Phase 1 scaffold
       </p>
+      <a
+        href="/personal-agent"
+        className="mt-6 rounded bg-black px-4 py-2 text-white"
+      >
+        Open Personal Agent
+      </a>
     </main>
   );
 }
