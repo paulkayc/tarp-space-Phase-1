@@ -18,7 +18,6 @@ class PersonalAgentMessage(BaseModel):
     role: str
     content: str
     persona_delta: dict | None = None
-    mandate_delta: dict | None = None
     completeness_after: float = 0.0
     created_at: datetime
 
@@ -37,7 +36,6 @@ class PersonalAgentTurnResult(BaseModel):
     agent_message: PersonalAgentMessage
     persona: dict
     persona_delta: dict
-    mandate_delta: dict
     completeness_score: float
     gaps_remaining: list[str]
     next_gap: str | None = None

@@ -10,6 +10,9 @@ def test_personal_agent_session_create_and_history(client, user_uuid):
     payload = create_response.json()
     conversation_id = payload["conversation"]["id"]
     assert payload["agent_message"]["role"] == "agent"
+    # Opening prompt should be about getting to know the user, not about buying/selling
+    opening = payload["agent_message"]["content"].lower()
+    assert any(word in opening for word in ["name", "based", "know you", "personal"])
 
     history_response = client.get(
         f"/api/v1/personal-agent/sessions/{conversation_id}",
@@ -21,7 +24,7 @@ def test_personal_agent_session_create_and_history(client, user_uuid):
     assert history["total"] >= 1
 
 
-def test_personal_agent_send_message_and_memory_question(client, user_uuid):
+def test_personal_agent_captures_name_and_city(client, user_uuid):
     create_response = client.post(
         "/api/v1/personal-agent/sessions",
         headers={"X-Dev-User-Id": user_uuid},
@@ -31,13 +34,61 @@ def test_personal_agent_send_message_and_memory_question(client, user_uuid):
     send_response = client.post(
         f"/api/v1/personal-agent/sessions/{conversation_id}/messages",
         headers={"X-Dev-User-Id": user_uuid},
-        json={"content": "I want to buy a modern sofa in Houston under $900."},
+        json={"content": "My name is Alex and I live in Houston."},
     )
     assert send_response.status_code == status.HTTP_200_OK
     turn = send_response.json()
-    assert turn["persona"]["category"] == "furniture"
-    assert turn["persona"]["location"] == "Houston"
 
+    # Persona fields should reflect personal profile, not mandate fields
+    assert turn["persona"].get("name") == "Alex"
+    assert "houston" in str(turn["persona"].get("home_city", "")).lower()
+
+    # The response must NOT contain mandate-style fields
+    assert "intent_type" not in turn["persona"]
+    assert "category" not in turn["persona"]
+    assert "budget" not in turn["persona"]
+
+    # mandate_delta must NOT appear in the response
+    assert "mandate_delta" not in turn
+
+
+def test_personal_agent_does_not_ask_mandate_questions(client, user_uuid):
+    create_response = client.post(
+        "/api/v1/personal-agent/sessions",
+        headers={"X-Dev-User-Id": user_uuid},
+    )
+    conversation_id = create_response.json()["conversation"]["id"]
+
+    send_response = client.post(
+        f"/api/v1/personal-agent/sessions/{conversation_id}/messages",
+        headers={"X-Dev-User-Id": user_uuid},
+        json={"content": "My name is Sam."},
+    )
+    assert send_response.status_code == status.HTTP_200_OK
+    agent_reply = send_response.json()["agent_message"]["content"].lower()
+
+    # Personal agent should NOT ask mandate questions
+    mandate_keywords = ["buy", "sell", "category", "budget", "condition", "timing", "service"]
+    assert not any(kw in agent_reply for kw in mandate_keywords), (
+        f"Personal agent asked a mandate question: {agent_reply}"
+    )
+
+
+def test_personal_agent_memory_question(client, user_uuid):
+    create_response = client.post(
+        "/api/v1/personal-agent/sessions",
+        headers={"X-Dev-User-Id": user_uuid},
+    )
+    conversation_id = create_response.json()["conversation"]["id"]
+
+    # First teach the agent something
+    client.post(
+        f"/api/v1/personal-agent/sessions/{conversation_id}/messages",
+        headers={"X-Dev-User-Id": user_uuid},
+        json={"content": "My name is Jordan and I live in Austin."},
+    )
+
+    # Then ask what it remembers
     memory_response = client.post(
         f"/api/v1/personal-agent/sessions/{conversation_id}/messages",
         headers={"X-Dev-User-Id": user_uuid},
@@ -45,8 +96,8 @@ def test_personal_agent_send_message_and_memory_question(client, user_uuid):
     )
     assert memory_response.status_code == status.HTTP_200_OK
     memory_turn = memory_response.json()
-    assert "remember" in memory_turn["agent_message"]["content"].lower()
-    assert "category: furniture" in memory_turn["agent_message"]["content"].lower()
+    content = memory_turn["agent_message"]["content"].lower()
+    assert "remember" in content
 
 
 def test_personal_agent_session_isolation(client, user_uuid, other_user_uuid):
@@ -72,8 +123,8 @@ def test_personal_agent_memory_crud_and_search(client, user_uuid):
         "/api/v1/personal-agent/memories",
         headers={"X-Dev-User-Id": user_uuid},
         json={
-            "content": "prefers modern style furniture",
-            "tags": ["style", "persona"],
+            "content": "prefers concise updates",
+            "tags": ["communication_style", "persona"],
             "source": "explicit",
             "confidence": 1.0,
         },
@@ -85,21 +136,21 @@ def test_personal_agent_memory_crud_and_search(client, user_uuid):
     search_response = client.get(
         "/api/v1/personal-agent/memories/search",
         headers={"X-Dev-User-Id": user_uuid},
-        params={"q": "modern style", "limit": 5},
+        params={"q": "concise updates", "limit": 5},
     )
     assert search_response.status_code == status.HTTP_200_OK
     payload = search_response.json()
     assert payload["count"] >= 1
-    assert any("modern style furniture" in item["content"] for item in payload["memories"])
+    assert any("concise updates" in item["content"] for item in payload["memories"])
 
     update_response = client.patch(
         f"/api/v1/personal-agent/memories/{memory_id}",
         headers={"X-Dev-User-Id": user_uuid},
-        json={"content": "prefers mid-century modern style furniture"},
+        json={"content": "prefers brief bullet-point summaries"},
     )
     assert update_response.status_code == status.HTTP_200_OK
     updated = update_response.json()
-    assert "mid-century modern" in updated["content"]
+    assert "brief" in updated["content"]
 
     list_response = client.get(
         "/api/v1/personal-agent/memories",
