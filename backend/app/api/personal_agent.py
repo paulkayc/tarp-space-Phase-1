@@ -16,6 +16,7 @@ from app.agents.personal_agent.schemas import (
 from app.core.auth import get_current_user, get_current_user_id
 from app.db.models import OnboardingMessage, PersonalMemory, User
 from app.db.session import get_db
+from app.security.agent_admin_acl import require_agent_admin
 
 router = APIRouter()
 
@@ -206,3 +207,16 @@ def update_memory(
 def list_tools(db: Session = Depends(get_db)):
     runtime = PersonalAgentRuntime(db)
     return {"tools": runtime.list_tools(), "count": len(runtime.list_tools())}
+
+
+@router.post("/admin/tools/reload")
+def reload_tools(
+    _admin: dict = Depends(require_agent_admin),
+    db: Session = Depends(get_db),
+):
+    runtime = PersonalAgentRuntime(db)
+    return {
+        "reloaded": True,
+        "count": len(runtime.list_tools()),
+        "tools": runtime.list_tools(),
+    }

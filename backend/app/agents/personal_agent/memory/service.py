@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from app.db.models import PersonalMemory, PersonalMemoryEvent
+from app.observability.events import emit_memory_event
 
 
 class PersonalMemoryService:
@@ -52,6 +53,7 @@ class PersonalMemoryService:
         )
         self.db.commit()
         self.db.refresh(memory)
+        emit_memory_event(owner_id=str(owner_id), memory_id=str(memory.id), action="created")
         return memory
 
     def list_memories(self, owner_id: UUID, include_inactive: bool = False) -> list[PersonalMemory]:
@@ -128,4 +130,5 @@ class PersonalMemoryService:
         )
         self.db.commit()
         self.db.refresh(memory)
+        emit_memory_event(owner_id=str(owner_id), memory_id=str(memory.id), action=event_type)
         return memory

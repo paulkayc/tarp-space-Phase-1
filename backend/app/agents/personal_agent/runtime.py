@@ -13,6 +13,7 @@ from app.agents.personal_agent.prompt_builder import build_memory_reflection, de
 from app.agents.personal_agent.tools import ToolExecutor, ToolRegistry, register_builtin_tools
 from app.core.config import settings
 from app.db.models import OnboardingMessage, OnboardingSession, User
+from app.observability.events import emit_personal_agent_turn_event
 from app.services.conversation.extractor import extract_persona_and_mandate_delta
 from app.services.conversation.gap_analyzer import analyze_gaps, compute_onboarding_completeness
 from app.services.conversation.reflector import build_reflection
@@ -96,6 +97,11 @@ class PersonalAgentRuntime:
         owner: User,
         content: str,
     ) -> tuple[OnboardingMessage, OnboardingMessage, dict, dict, dict, float, list[str], str | None, bool]:
+        emit_personal_agent_turn_event(
+            owner_id=str(owner.id),
+            conversation_id=str(session.id),
+            status="started",
+        )
         if session.status != "active":
             raise HTTPException(
                 status_code=422,
@@ -162,6 +168,11 @@ class PersonalAgentRuntime:
         self.db.commit()
         self.db.refresh(user_msg)
         self.db.refresh(agent_msg)
+        emit_personal_agent_turn_event(
+            owner_id=str(owner.id),
+            conversation_id=str(session.id),
+            status="completed",
+        )
 
         return (
             user_msg,
