@@ -76,11 +76,17 @@ export default function PersonalAgentPage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 p-6">
-      <header>
-        <h1 className="text-3xl font-bold">Personal Agent</h1>
-        <p className="text-gray-600">
-          Ask onboarding questions, save preferences, and inspect memory snippets.
-        </p>
+      <header className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Personal Agent</h1>
+          <p className="text-gray-600">
+            Learns who you are — your name, city, communication style, and
+            general interests. Nothing about buying or selling.
+          </p>
+        </div>
+        <a href="/" className="rounded border px-3 py-1 text-sm text-gray-600 hover:bg-gray-50">
+          ← Home
+        </a>
       </header>
 
       {error ? (
@@ -109,7 +115,7 @@ export default function PersonalAgentPage() {
           <form className="flex gap-2" onSubmit={onSubmit}>
             <input
               className="flex-1 rounded border px-3 py-2"
-              placeholder="Tell the agent what you prefer..."
+              placeholder="e.g. My name is Alex and I live in Houston..."
               value={input}
               onChange={(event) => setInput(event.target.value)}
             />
