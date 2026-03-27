@@ -35,6 +35,9 @@ class FakeSession:
     def refresh(self, _obj):
         return None
 
+    def rollback(self):
+        return None
+
     def close(self):
         return None
 

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import User
@@ -52,9 +53,18 @@ def get_current_user(
         updated_at=now,
     )
     db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+    try:
+        db.commit()
+        db.refresh(user)
+        return user
+    except IntegrityError:
+        # Concurrent request created the same external_user_id in between our
+        # read and insert. Recover by rolling back and returning the winner row.
+        db.rollback()
+        existing = _get_user_by_dev_user_id(db, parsed_dev_user_id)
+        if existing is not None:
+            return existing
+        raise
 
 
 def get_current_user_id(current_user: User = Depends(get_current_user)) -> str:

@@ -145,6 +145,74 @@ class OnboardingMessage(Base):
 
 
 # ---------------------------------------------------------------------------
+# personal_memories
+# ---------------------------------------------------------------------------
+class PersonalMemory(Base):
+    __tablename__ = "personal_memories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    content = Column(Text, nullable=False)
+    tags = Column(ARRAY(Text), nullable=False, default=list)
+    source = Column(Text, nullable=False, default="inferred")
+    confidence = Column(Numeric(4, 3), nullable=False, default=0.8)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('explicit','inferred','derived')",
+            name="ck_personal_memories_source",
+        ),
+        CheckConstraint(
+            "confidence BETWEEN 0 AND 1",
+            name="ck_personal_memories_confidence",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<PersonalMemory id={self.id}>"
+
+
+# ---------------------------------------------------------------------------
+# personal_memory_events
+# ---------------------------------------------------------------------------
+class PersonalMemoryEvent(Base):
+    __tablename__ = "personal_memory_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    memory_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("personal_memories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type = Column(Text, nullable=False)
+    previous_content = Column(Text)
+    new_content = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('created','updated','deactivated','reactivated')",
+            name="ck_personal_memory_events_event_type",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<PersonalMemoryEvent id={self.id}>"
+
+
+# ---------------------------------------------------------------------------
 # mandates
 # ---------------------------------------------------------------------------
 class Mandate(Base):
