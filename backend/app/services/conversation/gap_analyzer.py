@@ -1,35 +1,28 @@
 """
-Rule-based gap analysis for onboarding/persona collection.
+Rule-based gap analysis for personal agent persona collection.
+
+Tracks who the user is (name, city, preferences) — not what they want to buy.
+Mandate-specific gap analysis lives in app.agents.mandate_agent.gap_analyzer.
 """
 from __future__ import annotations
 
 from typing import Any
 
 
-_GAP_ORDER = [
-    "intent_type",
-    "vertical",
-    "category",
-    "budget",
-    "location",
-    "condition",
-    "timing",
-    "style_preferences",
-    "dealbreakers",
-    "autonomy_level",
+_PERSONA_GAP_ORDER = [
+    "name",
+    "home_city",
+    "communication_style",
+    "general_interests",
+    "deal_sensitivity",
 ]
 
-_QUESTIONS = {
-    "intent_type": "What are you trying to do right now: buy, sell, or find a service?",
-    "vertical": "Is this for goods or services?",
-    "category": "What category best describes what you need?",
-    "budget": "What budget range should I target?",
-    "location": "Which location should I focus on?",
-    "condition": "What condition is acceptable?",
-    "timing": "When do you need this completed?",
-    "style_preferences": "Any style or preference I should prioritize?",
-    "dealbreakers": "Any dealbreakers I should always avoid?",
-    "autonomy_level": "How autonomous should I be: supervised, escalate key points, or fully autonomous?",
+_PERSONA_QUESTIONS = {
+    "name": "What's your name? I'd like to address you properly.",
+    "home_city": "What city do you live in? This helps me find things nearby.",
+    "communication_style": "When I share results, do you prefer a quick summary or full detail?",
+    "general_interests": "What kinds of things do you usually buy, sell, or look for?",
+    "deal_sensitivity": "What matters most to you in a deal — best price, highest quality, or fastest convenience?",
 }
 
 
@@ -46,38 +39,42 @@ def _is_filled(persona: dict[str, Any], key: str) -> bool:
     return True
 
 
-def analyze_gaps(persona: dict[str, Any]) -> dict[str, Any]:
-    gaps_remaining = [key for key in _GAP_ORDER if not _is_filled(persona, key)]
+def analyze_persona_gaps(persona: dict[str, Any]) -> dict[str, Any]:
+    gaps_remaining = [key for key in _PERSONA_GAP_ORDER if not _is_filled(persona, key)]
     next_gap = gaps_remaining[0] if gaps_remaining else None
     return {
         "gaps_remaining": gaps_remaining,
         "next_gap": next_gap,
-        "next_question": _QUESTIONS.get(next_gap) if next_gap else None,
+        "next_question": _PERSONA_QUESTIONS.get(next_gap) if next_gap else None,
     }
 
 
-def compute_onboarding_completeness(persona: dict[str, Any]) -> float:
-    has_triplet = _is_filled(persona, "intent_type") and _is_filled(persona, "vertical") and _is_filled(
-        persona, "category"
-    )
-    has_budget = _is_filled(persona, "budget")
-    has_location = _is_filled(persona, "location")
-    has_condition = _is_filled(persona, "condition")
-    has_timing = _is_filled(persona, "timing")
-    has_style = _is_filled(persona, "style_preferences")
-    has_dealbreakers_key = "dealbreakers" in persona
-    has_meaningful_data = any(
-        [has_triplet, has_budget, has_location, has_condition, has_timing, has_style, has_dealbreakers_key]
-    )
-    if not has_meaningful_data:
-        return 0.0
+def compute_persona_completeness(persona: dict[str, Any]) -> float:
+    """Score 0-1 based on how much personal profile data has been collected.
 
+    Weights:
+      name                0.30
+      home_city           0.30
+      communication_style 0.15
+      general_interests   0.15
+      deal_sensitivity    0.10
+
+    Threshold 0.70 is reached once name + home_city + one preference field
+    are known (e.g. 0.30 + 0.30 + 0.15 = 0.75).
+    """
     score = 0.0
-    score += 0.35 if has_triplet else 0.0
-    score += 0.20 if has_budget else 0.0
-    score += 0.15 if has_location else 0.0
-    score += 0.075 if has_condition else 0.0
-    score += 0.075 if has_timing else 0.0
-    score += 0.10 if has_style else 0.0
-    score += 0.05 if has_dealbreakers_key else 0.0
+    score += 0.30 if _is_filled(persona, "name") else 0.0
+    score += 0.30 if _is_filled(persona, "home_city") else 0.0
+    score += 0.15 if _is_filled(persona, "communication_style") else 0.0
+    score += 0.15 if _is_filled(persona, "general_interests") else 0.0
+    score += 0.10 if _is_filled(persona, "deal_sensitivity") else 0.0
     return round(min(score, 1.0), 3)
+
+
+# ---------------------------------------------------------------------------
+# Legacy aliases — kept for the /conversations endpoint until it is retired.
+# These resolve to the PERSONA versions; conversations.py should be updated
+# to import directly from mandate_agent.gap_analyzer instead.
+# ---------------------------------------------------------------------------
+analyze_gaps = analyze_persona_gaps
+compute_onboarding_completeness = compute_persona_completeness

@@ -4,37 +4,44 @@ from typing import Any
 
 
 def default_opening_prompt() -> str:
-    return "Hi, I am your Personal Agent. Tell me what matters to you so I can remember it and help better over time."
+    return (
+        "Hi, I'm your Personal Agent. I'd love to get to know you a bit — "
+        "starting with your name and where you're based."
+    )
 
 
 def build_memory_reflection(persona: dict[str, Any]) -> str:
+    """Return a plain-text summary of what the personal agent knows about the user."""
     if not persona:
-        return "I don't have any saved preferences for you yet. Share what you like and I will remember it."
+        return (
+            "I don't have any saved details about you yet. "
+            "Tell me your name and where you're based to get started."
+        )
 
     parts: list[str] = []
-    intent = persona.get("intent_type")
-    if intent:
-        parts.append(f"intent: {intent}")
 
-    category = persona.get("category")
-    if category:
-        parts.append(f"category: {category}")
+    name = persona.get("name")
+    if name:
+        parts.append(f"your name: {name}")
 
-    location = persona.get("location")
-    if location:
-        parts.append(f"location: {location}")
+    home_city = persona.get("home_city")
+    if home_city:
+        parts.append(f"home city: {home_city}")
 
-    budget = persona.get("budget")
-    if isinstance(budget, dict) and budget:
-        parts.append(f"budget: {budget}")
+    comm_style = persona.get("communication_style")
+    if comm_style:
+        parts.append(f"communication style: {comm_style}")
 
-    styles = persona.get("style_preferences")
-    if styles:
-        parts.append(f"styles: {styles}")
+    interests = persona.get("general_interests")
+    if interests:
+        if isinstance(interests, list):
+            parts.append(f"interests: {', '.join(interests)}")
+        else:
+            parts.append(f"interests: {interests}")
 
-    dealbreakers = persona.get("dealbreakers")
-    if dealbreakers:
-        parts.append(f"dealbreakers: {dealbreakers}")
+    deal_sens = persona.get("deal_sensitivity")
+    if deal_sens:
+        parts.append(f"deal priority: {deal_sens}")
 
-    summary = "; ".join(parts) if parts else "a few early onboarding details"
+    summary = "; ".join(parts) if parts else "a few early details"
     return f"Here's what I currently remember: {summary}."

@@ -10,13 +10,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.agents.mandate_agent.gap_analyzer import analyze_mandate_gaps, compute_mandate_completeness
+from app.agents.mandate_agent.prompt_builder import build_mandate_reflection
 from app.core.auth import get_current_user
 from app.core.config import settings
 from app.db.models import OnboardingMessage, OnboardingSession, User
 from app.db.session import get_db
-from app.services.conversation.extractor import extract_persona_and_mandate_delta
-from app.services.conversation.gap_analyzer import analyze_gaps, compute_onboarding_completeness
-from app.services.conversation.reflector import build_reflection
+from app.services.conversation.extractor import extract_mandate_delta
 
 router = APIRouter()
 
@@ -177,12 +177,15 @@ def send_message(
 
     now = datetime.now(timezone.utc)
     existing_persona = current_user.persona or {}
-    persona_delta, mandate_delta = extract_persona_and_mandate_delta(payload.content, existing_persona)
-    merged_persona = _merge_persona(existing_persona, persona_delta)
+    # Legacy endpoint: extract mandate fields and store them on user.persona
+    # so that mandate prefill still works for older integrations.
+    mandate_delta = extract_mandate_delta(payload.content, {})
+    persona_delta = mandate_delta  # kept for backward compat field name in response
+    merged_persona = _merge_persona(existing_persona, mandate_delta)
     current_user.persona = merged_persona
 
-    completeness_score = compute_onboarding_completeness(merged_persona)
-    gap_info = analyze_gaps(merged_persona)
+    completeness_score = compute_mandate_completeness(merged_persona)
+    gap_info = analyze_mandate_gaps(merged_persona)
     is_complete = completeness_score >= settings.onboarding_completeness_threshold
 
     user_msg = OnboardingMessage(
@@ -197,12 +200,13 @@ def send_message(
     db.add(user_msg)
 
     if is_complete:
-        agent_text = build_reflection(merged_persona)
+        agent_text = build_mandate_reflection(merged_persona)
         session.status = "completed"
         session.completed_at = now
         current_user.onboarding_completed_at = now
     else:
         agent_text = gap_info["next_question"] or _new_agent_prompt()
+
 
     agent_msg = OnboardingMessage(
         session_id=session.id,

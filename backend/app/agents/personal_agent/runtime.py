@@ -14,9 +14,9 @@ from app.agents.personal_agent.tools import ToolExecutor, ToolRegistry, register
 from app.core.config import settings
 from app.db.models import OnboardingMessage, OnboardingSession, User
 from app.observability.events import emit_personal_agent_turn_event
-from app.services.conversation.extractor import extract_persona_and_mandate_delta
-from app.services.conversation.gap_analyzer import analyze_gaps, compute_onboarding_completeness
-from app.services.conversation.reflector import build_reflection
+from app.services.conversation.extractor import extract_persona_delta
+from app.services.conversation.gap_analyzer import analyze_persona_gaps, compute_persona_completeness
+from app.services.conversation.reflector import build_persona_reflection
 
 
 class PersonalAgentRuntime:
@@ -96,7 +96,7 @@ class PersonalAgentRuntime:
         session: OnboardingSession,
         owner: User,
         content: str,
-    ) -> tuple[OnboardingMessage, OnboardingMessage, dict, dict, dict, float, list[str], str | None, bool]:
+    ) -> tuple[OnboardingMessage, OnboardingMessage, dict, dict, float, list[str], str | None, bool]:
         emit_personal_agent_turn_event(
             owner_id=str(owner.id),
             conversation_id=str(session.id),
@@ -113,10 +113,9 @@ class PersonalAgentRuntime:
 
         if is_memory_question(content):
             persona_delta = {}
-            mandate_delta = {}
             merged_persona = existing_persona
-            completeness_score = compute_onboarding_completeness(merged_persona)
-            gap_info = analyze_gaps(merged_persona)
+            completeness_score = compute_persona_completeness(merged_persona)
+            gap_info = analyze_persona_gaps(merged_persona)
             memory_hits = self.tool_executor.execute(
                 "memory_search", owner_id=owner.id, query="preferences", limit=5
             )
@@ -127,15 +126,15 @@ class PersonalAgentRuntime:
                 agent_text = build_memory_reflection(merged_persona)
             is_complete = completeness_score >= settings.onboarding_completeness_threshold
         else:
-            persona_delta, mandate_delta = extract_persona_and_mandate_delta(content, existing_persona)
+            persona_delta = extract_persona_delta(content, existing_persona)
             merged_persona = self._merge_persona(existing_persona, persona_delta)
             owner.persona = merged_persona
             self._persist_persona_memories(owner.id, persona_delta)
-            completeness_score = compute_onboarding_completeness(merged_persona)
-            gap_info = analyze_gaps(merged_persona)
+            completeness_score = compute_persona_completeness(merged_persona)
+            gap_info = analyze_persona_gaps(merged_persona)
             is_complete = completeness_score >= settings.onboarding_completeness_threshold
             if is_complete:
-                agent_text = build_reflection(merged_persona)
+                agent_text = build_persona_reflection(merged_persona)
                 owner.onboarding_completed_at = now
             else:
                 agent_text = gap_info["next_question"] or default_opening_prompt()
@@ -156,7 +155,7 @@ class PersonalAgentRuntime:
             session_id=session.id,
             role="agent",
             content=agent_text,
-            persona_delta=mandate_delta or None,
+            persona_delta=None,
             completeness_after=completeness_score,
             token_count=None,
             created_at=now,
@@ -179,7 +178,6 @@ class PersonalAgentRuntime:
             agent_msg,
             merged_persona,
             persona_delta,
-            mandate_delta,
             completeness_score,
             gap_info["gaps_remaining"],
             gap_info["next_gap"],
