@@ -179,7 +179,10 @@ def send_message(
     existing_persona = current_user.persona or {}
     # Legacy endpoint: extract mandate fields and store them on user.persona
     # so that mandate prefill still works for older integrations.
-    mandate_delta = extract_mandate_delta(payload.content, {})
+    try:
+        mandate_delta = extract_mandate_delta(payload.content, {})
+    except Exception:
+        mandate_delta = {}
     persona_delta = mandate_delta  # kept for backward compat field name in response
     merged_persona = _merge_persona(existing_persona, mandate_delta)
     current_user.persona = merged_persona
