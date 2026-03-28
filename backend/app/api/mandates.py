@@ -9,8 +9,12 @@ from app.core.auth import get_current_user
 from app.core.config import settings
 from app.db.models import Mandate, User
 from app.db.session import get_db
+from app.agents.mandate_agent.gap_analyzer import compute_mandate_completeness, derive_mandate_state
 from app.services.mandate.crud import prefill_mandate_from_persona
-from app.services.mandate.scoring import compute_completeness_score
+
+
+def compute_completeness_score(mandate: Mandate) -> float:  # type: ignore[type-arg]
+    return compute_mandate_completeness(derive_mandate_state(mandate))
 
 router = APIRouter()
 
@@ -83,10 +87,7 @@ def _serialize_mandate(mandate: Mandate) -> dict:
 
 
 def _get_mandate(db: Session, mandate_id: UUID) -> Mandate | None:
-    for mandate in db.query(Mandate).all():
-        if mandate.id == mandate_id:
-            return mandate
-    return None
+    return db.query(Mandate).filter_by(id=mandate_id).first()
 
 
 def _get_owned_mandate_or_raise(db: Session, mandate_id: UUID, owner_id: UUID) -> Mandate:
@@ -109,7 +110,7 @@ def list_mandates(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    mandates = [m for m in db.query(Mandate).all() if m.owner_id == current_user.id]
+    mandates = db.query(Mandate).filter_by(owner_id=current_user.id).all()
     mandates.sort(key=lambda item: item.created_at, reverse=True)
     return {
         "mandates": [_serialize_mandate(m) for m in mandates],

@@ -13,12 +13,6 @@ class PersonalMemoryService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _all_memories(self) -> list[PersonalMemory]:
-        return list(self.db.query(PersonalMemory).all())
-
-    def _all_events(self) -> list[PersonalMemoryEvent]:
-        return list(self.db.query(PersonalMemoryEvent).all())
-
     def add_memory(
         self,
         owner_id: UUID,
@@ -57,7 +51,7 @@ class PersonalMemoryService:
         return memory
 
     def list_memories(self, owner_id: UUID, include_inactive: bool = False) -> list[PersonalMemory]:
-        items = [m for m in self._all_memories() if m.owner_id == owner_id]
+        items = self.db.query(PersonalMemory).filter_by(owner_id=owner_id).all()
         if not include_inactive:
             items = [m for m in items if m.is_active]
         items.sort(key=lambda item: item.updated_at, reverse=True)
@@ -82,10 +76,7 @@ class PersonalMemoryService:
         return [memory for _, memory in matches[: max(1, limit)]]
 
     def get_memory(self, owner_id: UUID, memory_id: UUID) -> PersonalMemory | None:
-        for memory in self._all_memories():
-            if memory.id == memory_id and memory.owner_id == owner_id:
-                return memory
-        return None
+        return self.db.query(PersonalMemory).filter_by(id=memory_id, owner_id=owner_id).first()
 
     def update_memory(
         self,

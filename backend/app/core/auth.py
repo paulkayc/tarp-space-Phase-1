@@ -20,10 +20,7 @@ def _unauthorized(message: str) -> None:
 
 
 def _get_user_by_dev_user_id(db: Session, dev_user_id: str) -> User | None:
-    for user in db.query(User).all():
-        if user.external_user_id == dev_user_id:
-            return user
-    return None
+    return db.query(User).filter_by(external_user_id=dev_user_id).first()
 
 
 def get_current_user(

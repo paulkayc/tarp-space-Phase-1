@@ -14,7 +14,6 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.agents.mandate_agent.extractor import extract_mandate_delta
 from app.agents.mandate_agent.gap_analyzer import (
     analyze_mandate_gaps,
     apply_delta_to_mandate,
@@ -28,6 +27,9 @@ from app.agents.mandate_agent.prompt_builder import (
 from app.agents.personal_agent.memory.service import PersonalMemoryService
 from app.core.config import settings
 from app.db.models import Conversation, Mandate, Message
+from app.services.conversation.extractor import extract_mandate_delta
+from app.services.llm.client import LLMCallError, get_llm_client
+from app.services.llm.prompts.mandate_agent import RESPONSE_SYSTEM_PROMPT
 
 
 class MandateAgentRuntime:
@@ -49,7 +51,6 @@ class MandateAgentRuntime:
             field = tags & _persona_fields
             if field:
                 key = next(iter(field))
-                # Content format: "key: value"
                 if ":" in memory.content:
                     _, _, raw_value = memory.content.partition(":")
                     context[key] = raw_value.strip()
@@ -83,7 +84,6 @@ class MandateAgentRuntime:
             created_at=now,
             updated_at=now,
         )
-        # Pre-fill location from home_city if available
         home_city = persona_context.get("home_city")
         if home_city:
             mandate.hard_constraints = [{"field": "location", "value": home_city}]
@@ -123,18 +123,18 @@ class MandateAgentRuntime:
         return conversation, mandate, opening_msg
 
     def get_owned_session(self, owner_id: UUID, conversation_id: UUID) -> Conversation:
-        for conv in self.db.query(Conversation).all():
-            if conv.id == conversation_id:
-                if conv.owner_id != owner_id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={"error": "forbidden", "message": "You do not own this conversation"},
-                    )
-                return conv
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "not_found", "message": "Conversation not found"},
-        )
+        conv = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if conv is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": "Conversation not found"},
+            )
+        if conv.owner_id != owner_id:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "forbidden", "message": "You do not own this conversation"},
+            )
+        return conv
 
     def get_mandate_for_session(self, conversation: Conversation) -> Mandate:
         if conversation.mandate_id is None:
@@ -142,18 +142,79 @@ class MandateAgentRuntime:
                 status_code=404,
                 detail={"error": "not_found", "message": "No mandate linked to this conversation"},
             )
-        for mandate in self.db.query(Mandate).all():
-            if mandate.id == conversation.mandate_id:
-                return mandate
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "not_found", "message": "Mandate not found"},
-        )
+        mandate = self.db.query(Mandate).filter_by(id=conversation.mandate_id).first()
+        if mandate is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": "Mandate not found"},
+            )
+        return mandate
 
     def get_messages(self, conversation_id: UUID) -> list[Message]:
-        messages = [m for m in self.db.query(Message).all() if m.conversation_id == conversation_id]
+        messages = self.db.query(Message).filter_by(conversation_id=conversation_id).all()
         messages.sort(key=lambda item: item.created_at)
         return messages
+
+    # ------------------------------------------------------------------
+    # LLM response generation
+    # ------------------------------------------------------------------
+
+    def _generate_agent_response(
+        self,
+        conversation_id: UUID,
+        user_message: str,
+        mandate_delta: dict,
+        gap_info: dict,
+        is_complete: bool,
+        persona_context: dict,
+    ) -> tuple[str, int]:
+        """Call LLM for a natural language response. Returns (text, total_tokens).
+
+        Falls back to the template gap question if the LLM is unavailable.
+        """
+        try:
+            client = get_llm_client()
+
+            history = self.get_messages(conversation_id)
+            history = history[-(settings.llm_max_history_turns * 2):]
+
+            messages = []
+            for msg in history:
+                role = "assistant" if msg.role == "agent" else "user"
+                messages.append({"role": role, "content": msg.content})
+            messages.append({"role": "user", "content": user_message})
+
+            context_lines = [RESPONSE_SYSTEM_PROMPT]
+            if mandate_delta:
+                context_lines.append(f"\nJust extracted from this message: {mandate_delta}")
+            if is_complete:
+                context_lines.append("\nThe mandate is now complete.")
+            elif gap_info.get("next_gap"):
+                context_lines.append(
+                    f"\nNext field to collect: {gap_info['next_gap']}. "
+                    f"Suggested question: {gap_info.get('next_question', '')}"
+                )
+            system = "\n".join(context_lines)
+
+            response = client.messages.create(
+                model=settings.llm_model,
+                max_tokens=settings.llm_max_tokens,
+                system=system,
+                messages=messages,
+            )
+            text = ""
+            for block in response.content:
+                if getattr(block, "type", None) == "text":
+                    text = block.text
+                    break
+            total_tokens = (
+                getattr(response.usage, "input_tokens", 0)
+                + getattr(response.usage, "output_tokens", 0)
+            )
+            return text or (gap_info.get("next_question") or default_mandate_opening_prompt(persona_context)), total_tokens
+        except (LLMCallError, Exception):
+            fallback = gap_info.get("next_question") or default_mandate_opening_prompt(persona_context)
+            return fallback, 0
 
     # ------------------------------------------------------------------
     # Turn execution
@@ -189,10 +250,16 @@ class MandateAgentRuntime:
             agent_text = build_mandate_reflection(mandate_state)
             mandate.is_active = True
             conversation.status = "confirmed"
+            response_tokens = 0
         else:
-            agent_text = gap_info["next_question"] or default_mandate_opening_prompt(persona_context)
-
-        self.db.commit()
+            agent_text, response_tokens = self._generate_agent_response(
+                conversation_id=conversation.id,
+                user_message=content,
+                mandate_delta=mandate_delta,
+                gap_info=gap_info,
+                is_complete=is_complete,
+                persona_context=persona_context,
+            )
 
         user_msg = Message(
             id=uuid4(),
@@ -214,7 +281,7 @@ class MandateAgentRuntime:
             completeness_after=completeness_score,
             gaps_remaining=gap_info["gaps_remaining"],
             created_at=now,
-            token_count=None,
+            token_count=response_tokens or None,
         )
 
         self.db.add(user_msg)

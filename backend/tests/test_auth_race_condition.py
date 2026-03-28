@@ -16,11 +16,21 @@ class RaceSession:
         def __init__(self, parent, model):
             self.parent = parent
             self.model = model
+            self._filters: dict = {}
+
+        def filter_by(self, **kwargs):
+            self._filters = kwargs
+            return self
 
         def all(self):
-            if self.model is User:
-                return list(self.parent.users)
-            return []
+            items = list(self.parent.users) if self.model is User else []
+            for key, value in self._filters.items():
+                items = [item for item in items if getattr(item, key, None) == value]
+            return items
+
+        def first(self):
+            results = self.all()
+            return results[0] if results else None
 
     def query(self, model):
         return self._Query(self, model)
