@@ -13,15 +13,49 @@ export const apiClient = axios.create({
 });
 
 // ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
+
+export type AgentMessage = {
+  id: string;
+  role: string;
+  content: string;
+  completeness_after: number;
+  created_at: string;
+};
+
+// ---------------------------------------------------------------------------
 // Personal Agent
 // ---------------------------------------------------------------------------
 
-export type PersonalAgentSession = {
-  conversation: { id: string; status: string };
-  agent_message: { content: string };
+export type Persona = {
+  name?: string;
+  home_city?: string;
+  communication_style?: string;
+  general_interests?: string[];
+  deal_sensitivity?: string;
+  [key: string]: unknown;
 };
 
-export async function createPersonalAgentSession() {
+export type PersonalAgentSession = {
+  conversation: { id: string; status: string; created_at: string };
+  agent_message: AgentMessage;
+  persona: Persona;
+};
+
+export type PersonalAgentTurnResponse = {
+  conversation: { id: string; status: string };
+  user_message: AgentMessage;
+  agent_message: AgentMessage;
+  persona_delta: Persona;
+  persona: Persona;
+  completeness_score: number;
+  gaps_remaining: string[];
+  next_gap: string | null;
+  elicitation_complete: boolean;
+};
+
+export async function createPersonalAgentSession(): Promise<PersonalAgentSession> {
   const { data } = await apiClient.post<PersonalAgentSession>(
     "/api/v1/personal-agent/sessions",
   );
@@ -31,8 +65,8 @@ export async function createPersonalAgentSession() {
 export async function sendPersonalAgentMessage(
   conversationId: string,
   content: string,
-) {
-  const { data } = await apiClient.post(
+): Promise<PersonalAgentTurnResponse> {
+  const { data } = await apiClient.post<PersonalAgentTurnResponse>(
     `/api/v1/personal-agent/sessions/${conversationId}/messages`,
     { content },
   );
@@ -48,14 +82,24 @@ export async function listPersonalMemories() {
 // Mandate Agent
 // ---------------------------------------------------------------------------
 
-export type MandateAgentSession = {
-  conversation: { id: string; status: string; mandate_id: string | null };
-  mandate: MandateState;
-  agent_message: { content: string };
+/** Flat mandate state returned from derive_mandate_state on the backend. */
+export type FlatMandateState = {
+  intent_type?: string;
+  vertical?: string;
+  category?: string;
+  budget?: { min?: number; max?: number };
+  location?: string;
+  condition?: string;
+  timing?: string;
+  style_preferences?: string[];
+  dealbreakers?: string[];
+  autonomy_level?: string;
 };
 
+/** Full ORM mandate returned from session create / GET mandate endpoints. */
 export type MandateState = {
   id: string;
+  owner_id: string;
   intent_type: string | null;
   vertical: string | null;
   category: string | null;
@@ -66,10 +110,28 @@ export type MandateState = {
   autonomy_level: string;
   completeness_score: number;
   is_active: boolean;
-  mandate_state: Record<string, unknown>;
+  mandate_state: FlatMandateState;
 };
 
-export async function createMandateAgentSession() {
+export type MandateAgentSession = {
+  conversation: { id: string; status: string; mandate_id: string | null };
+  mandate: MandateState;
+  agent_message: AgentMessage;
+};
+
+export type MandateAgentTurnResponse = {
+  conversation: { id: string; status: string };
+  user_message: AgentMessage;
+  agent_message: AgentMessage;
+  mandate_delta: Partial<FlatMandateState> & Record<string, unknown>;
+  mandate_state: FlatMandateState;
+  completeness_score: number;
+  gaps_remaining: string[];
+  next_gap: string | null;
+  mandate_complete: boolean;
+};
+
+export async function createMandateAgentSession(): Promise<MandateAgentSession> {
   const { data } = await apiClient.post<MandateAgentSession>(
     "/api/v1/mandate-agent/sessions",
   );
@@ -79,15 +141,17 @@ export async function createMandateAgentSession() {
 export async function sendMandateAgentMessage(
   conversationId: string,
   content: string,
-) {
-  const { data } = await apiClient.post(
+): Promise<MandateAgentTurnResponse> {
+  const { data } = await apiClient.post<MandateAgentTurnResponse>(
     `/api/v1/mandate-agent/sessions/${conversationId}/messages`,
     { content },
   );
   return data;
 }
 
-export async function getMandateAgentMandate(conversationId: string) {
+export async function getMandateAgentMandate(
+  conversationId: string,
+): Promise<MandateState> {
   const { data } = await apiClient.get<MandateState>(
     `/api/v1/mandate-agent/sessions/${conversationId}/mandate`,
   );

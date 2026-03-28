@@ -1,21 +1,31 @@
 """
 Conversation extraction helpers.
 
-Phase 1 implementation uses deterministic parsing so onboarding can be tested
-without live LLM dependencies.
+Public API (signatures unchanged):
+  extract_persona_delta()         — used by the Personal Agent
+  extract_mandate_delta()         — used by the Mandate Agent
+  extract_persona_and_mandate_delta() — legacy combined extractor for /conversations
 
-Two independent extraction paths:
-  extract_persona_delta()  — used by the Personal Agent (who the user IS)
-  extract_mandate_delta()  — used by the Mandate Agent (what the user WANTS)
+Each public function calls the LLM (structured tool_use extraction) and falls back
+to deterministic regex parsing when the LLM is unavailable or returns nothing useful.
 """
 from __future__ import annotations
 
 import re
+import structlog
 from typing import Any
+
+from app.services.llm.client import LLMCallError, get_llm_client
+from app.services.llm.schemas import MANDATE_EXTRACTION_TOOL, PERSONA_EXTRACTION_TOOL
+from app.services.llm.prompts.personal_agent import EXTRACTION_SYSTEM_PROMPT as _PERSONA_EXTRACTION_PROMPT
+from app.services.llm.prompts.mandate_agent import EXTRACTION_SYSTEM_PROMPT as _MANDATE_EXTRACTION_PROMPT
+from app.core.config import settings
+
+logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Shared keyword tables
+# Shared keyword tables (used by regex fallback)
 # ---------------------------------------------------------------------------
 
 _CATEGORY_KEYWORDS = {
@@ -39,7 +49,7 @@ _CONDITION_TERMS = ["new", "like new", "excellent", "good", "fair", "used"]
 
 
 # ---------------------------------------------------------------------------
-# Persona extraction helpers (Personal Agent path)
+# Regex fallback helpers — Persona path
 # ---------------------------------------------------------------------------
 
 def _find_name(text: str) -> str | None:
@@ -51,7 +61,6 @@ def _find_name(text: str) -> str | None:
         r"call me ([a-z]+)",
         r"name'?s ([a-z]+)",
     ]
-    # Guard against common false positives
     _stop_words = {
         "a", "an", "the", "not", "just", "here", "there", "going", "looking",
         "trying", "sure", "fine", "good", "bad", "happy", "interested",
@@ -130,43 +139,8 @@ def _find_deal_sensitivity(text: str) -> str | None:
     return None
 
 
-def extract_persona_delta(
-    user_message: str,
-    current_persona: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Extract personal profile fields from a user message.
-
-    Returns only fields that were detected (non-empty).  Existing fields from
-    current_persona are NOT included — only the delta from this message.
-    """
-    _ = current_persona or {}
-    delta: dict[str, Any] = {}
-
-    name = _find_name(user_message)
-    if name:
-        delta["name"] = name
-
-    home_city = _find_home_city(user_message)
-    if home_city:
-        delta["home_city"] = home_city
-
-    communication_style = _find_communication_style(user_message)
-    if communication_style:
-        delta["communication_style"] = communication_style
-
-    interests = _find_general_interests(user_message)
-    if interests:
-        delta["general_interests"] = interests
-
-    deal_sensitivity = _find_deal_sensitivity(user_message)
-    if deal_sensitivity:
-        delta["deal_sensitivity"] = deal_sensitivity
-
-    return delta
-
-
 # ---------------------------------------------------------------------------
-# Mandate extraction helpers (Mandate Agent path)
+# Regex fallback helpers — Mandate path
 # ---------------------------------------------------------------------------
 
 def _find_budget(text: str) -> dict[str, float]:
@@ -191,18 +165,28 @@ def _find_budget(text: str) -> dict[str, float]:
     return {}
 
 
-def _find_location(text: str) -> str | None:
-    match = re.search(r"\bin\s+([a-zA-Z][a-zA-Z\s]{1,40})", text)
-    if not match:
-        return None
-    candidate = match.group(1).strip(" .,!?")
-    candidate = re.split(
-        r"\b(between|under|within|with|around|by)\b",
-        candidate,
-        maxsplit=1,
-        flags=re.IGNORECASE,
-    )[0].strip()
-    return candidate or None
+def _find_location_mandate(text: str) -> str | None:
+    """Mandate-specific location finder (stricter than generic 'in X' pattern)."""
+    lowered = text.lower()
+    patterns = [
+        r"(?:located?|location|based)\s+in\s+([a-zA-Z][a-zA-Z\s]{1,40})",
+        r"(?:deliver(?:ed)?|pick\s*up|available)\s+in\s+([a-zA-Z][a-zA-Z\s]{1,40})",
+        r"(?:near|around)\s+([a-zA-Z][a-zA-Z\s]{1,40})",
+        r"in\s+((?:[A-Z][a-z]+\s?){1,3})",  # Title-case city names only
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            candidate = match.group(1).strip(" .,!?")
+            candidate = re.split(
+                r"\b(between|under|within|with|around|by|and|but)\b",
+                candidate,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip()
+            if candidate and len(candidate) >= 3:
+                return candidate
+    return None
 
 
 def _find_timing(text: str) -> str | None:
@@ -233,8 +217,9 @@ def _find_style_preferences(text: str) -> list[str]:
 
 def _find_dealbreakers(text: str) -> list[str]:
     lowered = text.lower()
+    _stop = {"sure", "problem", "idea", "way", "thanks", "thank", "worries"}
     matches = re.findall(r"(?:no|not)\s+([a-zA-Z][a-zA-Z\s-]{1,30})", lowered)
-    return [m.strip(" .,!?") for m in matches]
+    return [m.strip(" .,!?") for m in matches if m.strip(" .,!?").lower() not in _stop]
 
 
 def _infer_intent(text: str) -> str | None:
@@ -266,15 +251,44 @@ def _infer_category(text: str) -> str | None:
     return None
 
 
-def extract_mandate_delta(
+# ---------------------------------------------------------------------------
+# Regex fallback public functions
+# ---------------------------------------------------------------------------
+
+def _fallback_extract_persona_delta(
+    user_message: str,
+    current_persona: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    _ = current_persona or {}
+    delta: dict[str, Any] = {}
+
+    name = _find_name(user_message)
+    if name:
+        delta["name"] = name
+
+    home_city = _find_home_city(user_message)
+    if home_city:
+        delta["home_city"] = home_city
+
+    communication_style = _find_communication_style(user_message)
+    if communication_style:
+        delta["communication_style"] = communication_style
+
+    interests = _find_general_interests(user_message)
+    if interests:
+        delta["general_interests"] = interests
+
+    deal_sensitivity = _find_deal_sensitivity(user_message)
+    if deal_sensitivity:
+        delta["deal_sensitivity"] = deal_sensitivity
+
+    return delta
+
+
+def _fallback_extract_mandate_delta(
     user_message: str,
     persona_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Extract mandate fields from a user message.
-
-    persona_context may include 'home_city' which is used as a location
-    fallback when no explicit location is stated in the message.
-    """
     persona_context = persona_context or {}
     delta: dict[str, Any] = {}
 
@@ -295,7 +309,7 @@ def extract_mandate_delta(
 
     hard_constraints: list[dict[str, Any]] = []
 
-    location = _find_location(user_message)
+    location = _find_location_mandate(user_message)
     if not location and persona_context.get("home_city"):
         location = persona_context["home_city"]
     if location:
@@ -324,8 +338,149 @@ def extract_mandate_delta(
 
 
 # ---------------------------------------------------------------------------
+# LLM extraction helpers
+# ---------------------------------------------------------------------------
+
+def _llm_extract_persona(user_message: str, client: Any) -> dict[str, Any]:
+    """Call LLM to extract persona fields. Returns {} on any failure."""
+    response = client.messages.create(
+        model=settings.llm_model,
+        max_tokens=256,
+        system=_PERSONA_EXTRACTION_PROMPT,
+        tools=[PERSONA_EXTRACTION_TOOL],
+        tool_choice={"type": "tool", "name": "extract_persona_fields"},
+        messages=[{"role": "user", "content": user_message}],
+    )
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "extract_persona_fields":
+            raw: dict = block.input or {}
+            delta: dict[str, Any] = {}
+            if raw.get("name"):
+                delta["name"] = str(raw["name"])
+            if raw.get("home_city"):
+                delta["home_city"] = str(raw["home_city"])
+            if raw.get("communication_style") in ("detailed", "brief"):
+                delta["communication_style"] = raw["communication_style"]
+            interests = raw.get("general_interests")
+            if isinstance(interests, list) and interests:
+                delta["general_interests"] = [str(i) for i in interests]
+            if raw.get("deal_sensitivity") in ("price_first", "quality_first", "convenience_first"):
+                delta["deal_sensitivity"] = raw["deal_sensitivity"]
+            return delta
+    return {}
+
+
+def _llm_extract_mandate(
+    user_message: str,
+    persona_context: dict[str, Any],
+    client: Any,
+) -> dict[str, Any]:
+    """Call LLM to extract mandate fields. Returns {} on any failure."""
+    response = client.messages.create(
+        model=settings.llm_model,
+        max_tokens=512,
+        system=_MANDATE_EXTRACTION_PROMPT,
+        tools=[MANDATE_EXTRACTION_TOOL],
+        tool_choice={"type": "tool", "name": "extract_mandate_fields"},
+        messages=[{"role": "user", "content": user_message}],
+    )
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "extract_mandate_fields":
+            raw: dict = block.input or {}
+            delta: dict[str, Any] = {}
+
+            valid_intents = {"buy", "sell", "request_service", "offer_service"}
+            if raw.get("intent_type") in valid_intents:
+                delta["intent_type"] = raw["intent_type"]
+                vertical = _infer_vertical(raw["intent_type"])
+                if raw.get("vertical") in ("goods", "services"):
+                    vertical = raw["vertical"]
+                if vertical:
+                    delta["vertical"] = vertical
+
+            if raw.get("category"):
+                delta["category"] = str(raw["category"])
+
+            budget_min = raw.get("budget_min")
+            budget_max = raw.get("budget_max")
+            if budget_min is not None or budget_max is not None:
+                entry: dict[str, Any] = {"dimension": "price"}
+                if budget_min is not None:
+                    entry["min"] = float(budget_min)
+                if budget_max is not None:
+                    entry["max"] = float(budget_max)
+                delta["negotiation_range"] = [entry]
+
+            hard_constraints: list[dict[str, Any]] = []
+            location = raw.get("location") or persona_context.get("home_city")
+            if location:
+                hard_constraints.append({"field": "location", "value": str(location)})
+
+            valid_conditions = {"new", "like new", "excellent", "good", "fair", "used"}
+            if raw.get("condition") in valid_conditions:
+                hard_constraints.append({"field": "condition", "value": raw["condition"]})
+
+            if raw.get("timing"):
+                hard_constraints.append({"field": "timing", "value": str(raw["timing"])})
+
+            if hard_constraints:
+                delta["hard_constraints"] = hard_constraints
+
+            styles = raw.get("style_preferences")
+            if isinstance(styles, list) and styles:
+                delta["soft_preferences"] = [{"field": "style", "value": str(s)} for s in styles]
+
+            dealbreakers = raw.get("dealbreakers")
+            if isinstance(dealbreakers, list) and dealbreakers:
+                delta["dealbreakers"] = [str(d) for d in dealbreakers]
+
+            return delta
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Public extraction functions
+# ---------------------------------------------------------------------------
+
+def extract_persona_delta(
+    user_message: str,
+    current_persona: dict[str, Any] | None = None,
+    _client: Any = None,
+) -> dict[str, Any]:
+    """Extract personal profile fields from a user message.
+
+    Attempts LLM extraction first; falls back to regex on any error.
+    Returns only the delta (non-empty detected fields).
+    """
+    try:
+        client = _client if _client is not None else get_llm_client()
+        return _llm_extract_persona(user_message, client)
+    except (LLMCallError, Exception) as exc:
+        logger.warning("persona_extraction_llm_failed", error=str(exc), fallback="regex")
+        return _fallback_extract_persona_delta(user_message, current_persona)
+
+
+def extract_mandate_delta(
+    user_message: str,
+    persona_context: dict[str, Any] | None = None,
+    _client: Any = None,
+) -> dict[str, Any]:
+    """Extract mandate fields from a user message.
+
+    persona_context may include 'home_city' used as a location fallback.
+    Attempts LLM extraction first; falls back to regex on any error.
+    """
+    persona_context = persona_context or {}
+    try:
+        client = _client if _client is not None else get_llm_client()
+        return _llm_extract_mandate(user_message, persona_context, client)
+    except (LLMCallError, Exception) as exc:
+        logger.warning("mandate_extraction_llm_failed", error=str(exc), fallback="regex")
+        return _fallback_extract_mandate_delta(user_message, persona_context)
+
+
+# ---------------------------------------------------------------------------
 # Legacy combined extractor — kept for the /conversations endpoint.
-# New code should call extract_persona_delta or extract_mandate_delta directly.
 # ---------------------------------------------------------------------------
 
 def _to_mandate_delta(persona_delta: dict[str, Any]) -> dict[str, Any]:
@@ -366,9 +521,8 @@ def extract_persona_and_mandate_delta(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Legacy combined extractor used by /conversations endpoint.
 
-    Extracts mandate-oriented fields (intent, category, budget, etc.) into
-    both a 'persona_delta' (stored on user.persona) and a parallel
-    'mandate_delta'.  New code should use extract_mandate_delta() directly.
+    Uses regex only (no LLM) so it has no external dependencies.
+    New code should use extract_mandate_delta() directly.
     """
     _ = current_persona or {}
     persona_delta: dict[str, Any] = {}
@@ -388,7 +542,7 @@ def extract_persona_and_mandate_delta(
     if budget:
         persona_delta["budget"] = budget
 
-    location = _find_location(user_message)
+    location = _find_location_mandate(user_message)
     if location:
         persona_delta["location"] = location
 

@@ -17,6 +17,8 @@ from app.observability.events import emit_personal_agent_turn_event
 from app.services.conversation.extractor import extract_persona_delta
 from app.services.conversation.gap_analyzer import analyze_persona_gaps, compute_persona_completeness
 from app.services.conversation.reflector import build_persona_reflection
+from app.services.llm.client import LLMCallError, get_llm_client
+from app.services.llm.prompts.personal_agent import RESPONSE_SYSTEM_PROMPT
 
 
 class PersonalAgentRuntime:
@@ -58,18 +60,18 @@ class PersonalAgentRuntime:
         return session, first_message
 
     def get_owned_session(self, owner_id: UUID, conversation_id: UUID) -> OnboardingSession:
-        for session in self.db.query(OnboardingSession).all():
-            if session.id == conversation_id:
-                if session.owner_id != owner_id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={"error": "forbidden", "message": "You do not own this conversation"},
-                    )
-                return session
-        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Conversation not found"})
+        session = self.db.query(OnboardingSession).filter_by(id=conversation_id).first()
+        if session is None:
+            raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Conversation not found"})
+        if session.owner_id != owner_id:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "forbidden", "message": "You do not own this conversation"},
+            )
+        return session
 
     def get_messages(self, session_id: UUID) -> list[OnboardingMessage]:
-        messages = [m for m in self.db.query(OnboardingMessage).all() if m.session_id == session_id]
+        messages = self.db.query(OnboardingMessage).filter_by(session_id=session_id).all()
         messages.sort(key=lambda item: item.created_at)
         return messages
 
@@ -90,6 +92,65 @@ class PersonalAgentRuntime:
             else:
                 merged[key] = value
         return merged
+
+    def _generate_agent_response(
+        self,
+        session_id: UUID,
+        user_message: str,
+        persona_delta: dict,
+        gap_info: dict,
+        is_complete: bool,
+        merged_persona: dict,
+    ) -> tuple[str, int]:
+        """Call LLM for a natural language response. Returns (text, total_tokens).
+
+        Falls back to the template gap question if the LLM is unavailable.
+        """
+        try:
+            client = get_llm_client()
+
+            # Build conversation history (last N turns, oldest first)
+            history = self.get_messages(session_id)
+            history = history[-(settings.llm_max_history_turns * 2):]
+
+            messages = []
+            for msg in history:
+                role = "assistant" if msg.role == "agent" else "user"
+                messages.append({"role": role, "content": msg.content})
+            messages.append({"role": "user", "content": user_message})
+
+            # Inject extraction context and next-gap hint into system prompt
+            context_lines = [RESPONSE_SYSTEM_PROMPT]
+            if persona_delta:
+                context_lines.append(f"\nJust extracted from this message: {persona_delta}")
+            if is_complete:
+                context_lines.append("\nThe user's profile is now complete.")
+            elif gap_info.get("next_gap"):
+                context_lines.append(
+                    f"\nNext field to collect: {gap_info['next_gap']}. "
+                    f"Suggested question: {gap_info.get('next_question', '')}"
+                )
+            system = "\n".join(context_lines)
+
+            response = client.messages.create(
+                model=settings.llm_model,
+                max_tokens=settings.llm_max_tokens,
+                system=system,
+                messages=messages,
+            )
+            text = ""
+            for block in response.content:
+                if getattr(block, "type", None) == "text":
+                    text = block.text
+                    break
+            total_tokens = (
+                getattr(response.usage, "input_tokens", 0)
+                + getattr(response.usage, "output_tokens", 0)
+            )
+            return text or (gap_info.get("next_question") or default_opening_prompt()), total_tokens
+        except (LLMCallError, Exception):
+            fallback = gap_info.get("next_question") or default_opening_prompt()
+            return fallback, 0
 
     def run_turn(
         self,
@@ -125,6 +186,7 @@ class PersonalAgentRuntime:
             else:
                 agent_text = build_memory_reflection(merged_persona)
             is_complete = completeness_score >= settings.onboarding_completeness_threshold
+            response_tokens = 0
         else:
             persona_delta = extract_persona_delta(content, existing_persona)
             merged_persona = self._merge_persona(existing_persona, persona_delta)
@@ -133,11 +195,20 @@ class PersonalAgentRuntime:
             completeness_score = compute_persona_completeness(merged_persona)
             gap_info = analyze_persona_gaps(merged_persona)
             is_complete = completeness_score >= settings.onboarding_completeness_threshold
+
             if is_complete:
                 agent_text = build_persona_reflection(merged_persona)
                 owner.onboarding_completed_at = now
+                response_tokens = 0
             else:
-                agent_text = gap_info["next_question"] or default_opening_prompt()
+                agent_text, response_tokens = self._generate_agent_response(
+                    session_id=session.id,
+                    user_message=content,
+                    persona_delta=persona_delta,
+                    gap_info=gap_info,
+                    is_complete=is_complete,
+                    merged_persona=merged_persona,
+                )
 
         agent_text = enforce_one_question(agent_text)
         self.pipeline.run({"action_message": "turn_processed"})
@@ -157,7 +228,7 @@ class PersonalAgentRuntime:
             content=agent_text,
             persona_delta=None,
             completeness_after=completeness_score,
-            token_count=None,
+            token_count=response_tokens or None,
             created_at=now,
         )
 

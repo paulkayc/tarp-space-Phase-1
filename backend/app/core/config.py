@@ -37,8 +37,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
-    llm_model: str = "claude-sonnet-4-20250514"
+    llm_model: str = "claude-opus-4-6"
     llm_max_tokens: int = 1000
+    llm_max_history_turns: int = 10
 
     # Matching
     escalation_threshold_pct: float = 0.15
