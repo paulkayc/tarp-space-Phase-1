@@ -389,9 +389,17 @@ export default function MandateAgentPage() {
 
   return (
     <div
-      className="flex"
-      style={{ height: "calc(100vh - 56px)" }}
+      className="flex items-start justify-center px-4 py-4"
+      style={{ minHeight: "calc(100vh - 56px)", background: "#0d0f14" }}
     >
+      <div
+        className="flex w-full overflow-hidden rounded-xl"
+        style={{
+          maxWidth: 1280,
+          height: "calc(100vh - 56px - 32px)",
+          border: "1px solid #1e2235",
+        }}
+      >
       {/* ------------------------------------------------------------------ */}
       {/* LEFT — Chat panel                                                   */}
       {/* ------------------------------------------------------------------ */}
@@ -508,6 +516,7 @@ export default function MandateAgentPage() {
           delta={lastDelta}
           profileLoaded={profileLoaded}
         />
+      </div>
       </div>
     </div>
   );

@@ -328,7 +328,18 @@ export default function PersonalAgentPage() {
   };
 
   return (
-    <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
+    <div
+      className="flex items-start justify-center px-4 py-4"
+      style={{ minHeight: "calc(100vh - 56px)", background: "#0d0f14" }}
+    >
+      <div
+        className="flex w-full overflow-hidden rounded-xl"
+        style={{
+          maxWidth: 1280,
+          height: "calc(100vh - 56px - 32px)",
+          border: "1px solid #1e2235",
+        }}
+      >
       {/* ------------------------------------------------------------------ */}
       {/* LEFT — Chat panel                                                   */}
       {/* ------------------------------------------------------------------ */}
@@ -447,6 +458,7 @@ export default function PersonalAgentPage() {
           completeness={completeness}
           delta={lastDelta}
         />
+      </div>
       </div>
     </div>
   );

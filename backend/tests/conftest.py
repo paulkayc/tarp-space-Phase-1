@@ -92,72 +92,153 @@ class _MockMessage:
         self.usage = _MockUsage()
 
 
+def _inline_extract_persona(text: str) -> dict:
+    """Minimal inline persona extractor used by the test mock (no regex fallback)."""
+    import re
+    delta: dict = {}
+    low = text.lower()
+
+    # name
+    for pat in [r"my name is ([a-z]+)", r"i'?m ([a-z]+)", r"i am ([a-z]+)", r"call me ([a-z]+)"]:
+        m = re.search(pat, low)
+        if m and m.group(1) not in {"a", "an", "the", "not", "just", "here", "looking", "sure"}:
+            delta["name"] = m.group(1).capitalize()
+            break
+
+    # home_city
+    for pat in [r"i live in ([a-z][a-z\s]{1,30})", r"i'?m based in ([a-z][a-z\s]{1,30})",
+                r"i'?m from ([a-z][a-z\s]{1,30})", r"based in ([a-z][a-z\s]{1,30})"]:
+        m = re.search(pat, low)
+        if m:
+            city = re.split(r"\b(and|but|so|where|when|with|the|it)\b", m.group(1))[0].strip(" .,!?")
+            if city:
+                delta["home_city"] = city.title()
+            break
+
+    # communication_style
+    if any(t in low for t in ["brief", "concise", "short", "quick summary", "quick summaries"]):
+        delta["communication_style"] = "brief"
+    elif any(t in low for t in ["detailed", "comprehensive", "full detail"]):
+        delta["communication_style"] = "detailed"
+
+    # general_interests
+    _interest_tokens = {
+        "furniture": {"sofa", "couch", "table", "desk", "chair", "dresser", "bed", "furniture"},
+        "electronics": {"laptop", "phone", "tv", "television", "monitor", "electronics"},
+        "cars": {"car", "sedan", "suv", "truck", "vehicle"},
+        "appliances": {"fridge", "refrigerator", "washer", "dryer", "stove", "microwave", "appliance"},
+    }
+    found_interests = [cat for cat, tokens in _interest_tokens.items() if any(t in low for t in tokens)]
+    if found_interests:
+        delta["general_interests"] = found_interests
+
+    # deal_sensitivity
+    if any(t in low for t in ["best price", "cheapest", "bargain", "affordable", "price matters"]):
+        delta["deal_sensitivity"] = "price_first"
+    elif any(t in low for t in ["best quality", "premium", "high quality", "quality matters"]):
+        delta["deal_sensitivity"] = "quality_first"
+    elif any(t in low for t in ["fastest", "convenience", "near me"]):
+        delta["deal_sensitivity"] = "convenience_first"
+
+    return delta
+
+
+def _inline_extract_mandate(text: str) -> dict:
+    """Minimal inline mandate extractor used by the test mock (no regex fallback)."""
+    import re
+    low = text.lower()
+    flat: dict = {}
+
+    # intent
+    if "sell" in low:
+        flat["intent_type"] = "sell"
+        flat["vertical"] = "goods"
+    elif any(t in low for t in ["buy", "looking for", "need", "want", "i need"]):
+        flat["intent_type"] = "buy"
+        flat["vertical"] = "goods"
+
+    # category — keyword table
+    _cats = {
+        "furniture": {"sofa", "couch", "table", "desk", "chair", "dresser", "bed", "furniture"},
+        "car": {"car", "sedan", "suv", "truck"},
+        "appliance": {"fridge", "refrigerator", "washer", "dryer", "stove", "microwave", "appliance"},
+        "electronics": {"laptop", "phone", "tv", "television", "monitor"},
+    }
+    for cat, tokens in _cats.items():
+        if any(t in low for t in tokens):
+            flat["category"] = cat
+            break
+
+    # budget
+    rng = re.search(r"\$?\s*(\d{2,6})\s*(?:-|to)\s*\$?\s*(\d{2,6})", low)
+    if rng:
+        flat["budget_min"] = float(min(rng.group(1), rng.group(2)))
+        flat["budget_max"] = float(max(rng.group(1), rng.group(2)))
+    else:
+        mx = re.search(r"(?:under|below|less than|max)\s*\$?\s*(\d{2,6})", low)
+        if mx:
+            flat["budget_max"] = float(mx.group(1))
+        mn = re.search(r"(?:at least|minimum|min)\s*\$?\s*(\d{2,6})", low)
+        if mn:
+            flat["budget_min"] = float(mn.group(1))
+
+    # condition
+    for cond in ["like new", "excellent", "good", "fair", "used", "new"]:
+        if cond in low:
+            flat["condition"] = cond
+            break
+
+    # timing
+    if "asap" in low:
+        flat["timing"] = "asap"
+    else:
+        wm = re.search(r"within\s+([a-z0-9\s-]{1,20})", low)
+        if wm:
+            flat["timing"] = wm.group(1).strip(" .,")
+
+    return flat
+
+
 def _build_mock_anthropic_client() -> MagicMock:
     """Return a mock Anthropic client whose messages.create() simulates extraction."""
-    # Import fallback extractors lazily to avoid circular imports at module load.
-    from app.services.conversation.extractor import (
-        _fallback_extract_persona_delta,
-        _fallback_extract_mandate_delta,
-    )
 
     def _fake_create(**kwargs):
         tools = kwargs.get("tools", [])
         messages = kwargs.get("messages", [])
 
-        # Find the last user message content
+        # Find the last user message
         user_content = ""
         for msg in reversed(messages):
             if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if isinstance(content, str):
-                    user_content = content
+                c = msg.get("content", "")
+                if isinstance(c, str):
+                    user_content = c
                 break
 
         if tools:
             tool_name = tools[0]["name"]
 
             if tool_name == "extract_persona_fields":
-                delta = _fallback_extract_persona_delta(user_content)
+                delta = _inline_extract_persona(user_content)
                 return _MockMessage(
                     content=[_MockToolUseBlock("extract_persona_fields", delta)],
                     stop_reason="tool_use",
                 )
 
             if tool_name == "extract_mandate_fields":
-                raw = _fallback_extract_mandate_delta(user_content)
-                # Flatten negotiation_range → budget_min / budget_max
-                flat: dict = {}
-                for key in ("intent_type", "vertical", "category"):
-                    if key in raw:
-                        flat[key] = raw[key]
-                nr = raw.get("negotiation_range", [])
-                if nr:
-                    entry = nr[0]
-                    if "min" in entry:
-                        flat["budget_min"] = entry["min"]
-                    if "max" in entry:
-                        flat["budget_max"] = entry["max"]
-                for constraint in raw.get("hard_constraints", []):
-                    field = constraint.get("field")
-                    if field in ("location", "condition", "timing"):
-                        flat[field] = constraint["value"]
-                sp = raw.get("soft_preferences", [])
-                if sp:
-                    flat["style_preferences"] = [p["value"] for p in sp]
-                db_list = raw.get("dealbreakers")
-                if db_list:
-                    flat["dealbreakers"] = db_list
+                flat = _inline_extract_mandate(user_content)
                 return _MockMessage(
                     content=[_MockToolUseBlock("extract_mandate_fields", flat)],
                     stop_reason="tool_use",
                 )
 
-        # Response generation call — return a sensible agent message
+        # Response generation call
         system = kwargs.get("system", "")
-        if "mandate" in system.lower():
-            reply = "What's your budget for this?"
-        else:
-            reply = "Nice to meet you! What city are you based in?"
+        reply = (
+            "What's your budget for this?"
+            if "mandate" in system.lower()
+            else "Nice to meet you! What city are you based in?"
+        )
         return _MockMessage(content=[_MockTextBlock(reply)])
 
     mock_client = MagicMock()
