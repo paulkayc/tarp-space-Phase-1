@@ -14,7 +14,7 @@ def build_memory_reflection(persona: dict[str, Any]) -> str:
     """Return a plain-text summary of what the personal agent knows about the user."""
     if not persona:
         return (
-            "I don't have any saved details about you yet. "
+            "I don't have any saved details from memory yet. "
             "Tell me your name and where you're based to get started."
         )
 
@@ -44,4 +44,4 @@ def build_memory_reflection(persona: dict[str, Any]) -> str:
         parts.append(f"deal priority: {deal_sens}")
 
     summary = "; ".join(parts) if parts else "a few early details"
-    return f"Here's what I currently remember: {summary}."
+    return f"Here's what I remember from memory: {summary}."
