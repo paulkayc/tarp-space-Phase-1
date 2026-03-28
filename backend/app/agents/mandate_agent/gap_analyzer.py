@@ -36,6 +36,37 @@ _MANDATE_QUESTIONS = {
     "autonomy_level": "How autonomous should I be: supervised, escalate key points, or fully autonomous?",
 }
 
+_CATEGORY_DETAIL_PROMPTS = {
+    "car": "Do you have a specific car in mind, or should I focus on a body style like sedan or SUV?",
+    "vehicle": "Do you have a specific vehicle in mind, or should I focus on a body style like sedan, SUV, or truck?",
+    "automobile": "Do you have a specific automobile in mind, or should I focus on a body style like sedan or SUV?",
+}
+
+
+def _normalized_text(value: Any) -> str:
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def _needs_category_detail(state: dict[str, Any]) -> bool:
+    """Return True when we should ask a category-specific clarification question.
+
+    We ask for extra detail only after a category is present and before style
+    preferences are captured, which allows us to use style preferences for
+    practical subtype details (for example: sedan vs SUV).
+    """
+    category = _normalized_text(state.get("category"))
+    if not category or _is_filled(state, "style_preferences"):
+        return False
+    return category in _CATEGORY_DETAIL_PROMPTS
+
+
+def _category_detail_question(state: dict[str, Any]) -> str:
+    category = _normalized_text(state.get("category"))
+    return _CATEGORY_DETAIL_PROMPTS.get(
+        category,
+        "Any specific type or variant you want me to focus on?",
+    )
+
 
 def _is_filled(state: dict[str, Any], key: str) -> bool:
     if key not in state:
@@ -57,11 +88,17 @@ def analyze_mandate_gaps(mandate_state: dict[str, Any]) -> dict[str, Any]:
     (derived from the Mandate DB record via derive_mandate_state()).
     """
     gaps_remaining = [key for key in _MANDATE_GAP_ORDER if not _is_filled(mandate_state, key)]
+    if _needs_category_detail(mandate_state):
+        gaps_remaining.insert(0, "category_detail")
     next_gap = gaps_remaining[0] if gaps_remaining else None
+    next_question = _MANDATE_QUESTIONS.get(next_gap) if next_gap else None
+    if next_gap == "category_detail":
+        next_question = _category_detail_question(mandate_state)
+
     return {
         "gaps_remaining": gaps_remaining,
         "next_gap": next_gap,
-        "next_question": _MANDATE_QUESTIONS.get(next_gap) if next_gap else None,
+        "next_question": next_question,
     }
 
 
