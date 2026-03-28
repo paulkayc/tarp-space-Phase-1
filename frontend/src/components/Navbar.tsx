@@ -7,6 +7,7 @@ export function Navbar() {
   const pathname = usePathname();
   const isMandateActive = pathname === "/mandate-agent";
   const isPersonalActive = pathname === "/personal-agent";
+  const isBuilderActive = pathname === "/agent-builder";
 
   return (
     <nav
@@ -45,6 +46,17 @@ export function Navbar() {
           ].join(" ")}
         >
           mandate agent
+        </Link>
+              <Link
+          href="/agent-builder"
+          className={[
+            "rounded border px-4 py-1.5 font-mono text-sm tracking-wide transition-colors",
+            isBuilderActive
+              ? "border-emerald-400 text-emerald-300"
+              : "border-border-dark text-muted hover:border-muted hover:text-primary",
+          ].join(" ")}
+        >
+          agent builder
         </Link>
       </div>
     </nav>
