@@ -58,6 +58,28 @@ export default function Home() {
             open →
           </span>
         </Link>
+      
+        <Link
+          href="/agent-builder"
+          className="group flex flex-col rounded-lg p-6 transition-colors"
+          style={{
+            background: "#141720",
+            border: "1px solid #34d399",
+          }}
+        >
+          <span className="mb-0.5 font-mono text-[10px] tracking-[0.2em] text-muted">
+            AGENT LAB
+          </span>
+          <span className="mb-2 text-lg font-semibold text-primary">
+            Visual Agent Builder
+          </span>
+          <span className="text-sm leading-relaxed text-muted">
+            Build agent graphs visually, attach tools and guardrails, validate, simulate, then generate and import runtime files.
+          </span>
+          <span className="mt-5 self-start font-mono text-xs text-emerald-300 group-hover:underline">
+            open →
+          </span>
+        </Link>
       </div>
     </main>
   );
