@@ -1,39 +1,63 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <h1 className="text-4xl font-bold">Tarp-Space</h1>
-      <p className="mt-4 text-lg text-gray-600">
-        Local marketplace powered by AI agents — Phase 1 scaffold
-      </p>
+    <main className="flex min-h-[calc(100vh-56px)] flex-col items-center justify-center px-6">
+      <div className="mb-12 text-center">
+        <h1 className="text-4xl font-bold tracking-tight text-primary">
+          tarpspace
+        </h1>
+        <p className="mt-2 font-mono text-sm text-muted">
+          local marketplace · phase 1 poc
+        </p>
+      </div>
 
-      <div className="mt-8 grid gap-6 sm:grid-cols-2">
-        <a
+      <div className="grid w-full max-w-2xl gap-4 sm:grid-cols-2">
+        <Link
           href="/personal-agent"
-          className="flex flex-col rounded border p-6 text-left hover:bg-gray-50"
+          className="group flex flex-col rounded-lg p-6 transition-colors"
+          style={{
+            background: "#141720",
+            border: "1px solid #252836",
+          }}
         >
-          <span className="mb-1 text-lg font-semibold">Personal Agent</span>
-          <span className="text-sm text-gray-500">
+          <span className="mb-0.5 font-mono text-[10px] tracking-[0.2em] text-muted">
+            AGENT 01
+          </span>
+          <span className="mb-2 text-lg font-semibold text-primary">
+            Personal Agent
+          </span>
+          <span className="text-sm leading-relaxed text-muted">
             Learns who you are — name, city, preferences, and communication
             style. Saves everything to long-term memory.
           </span>
-          <span className="mt-4 self-start rounded bg-black px-4 py-2 text-sm text-white">
-            Open →
+          <span className="mt-5 self-start font-mono text-xs text-accent-blue group-hover:underline">
+            open →
           </span>
-        </a>
+        </Link>
 
-        <a
+        <Link
           href="/mandate-agent"
-          className="flex flex-col rounded border p-6 text-left hover:bg-gray-50"
+          className="group flex flex-col rounded-lg p-6 transition-colors"
+          style={{
+            background: "#141720",
+            border: "1px solid #60a5fa",
+          }}
         >
-          <span className="mb-1 text-lg font-semibold">Mandate Agent</span>
-          <span className="text-sm text-gray-500">
+          <span className="mb-0.5 font-mono text-[10px] tracking-[0.2em] text-muted">
+            AGENT 02
+          </span>
+          <span className="mb-2 text-lg font-semibold text-primary">
+            Mandate Agent
+          </span>
+          <span className="text-sm leading-relaxed text-muted">
             Learns what you want right now — intent, category, budget,
             location, and conditions. Builds a structured mandate.
           </span>
-          <span className="mt-4 self-start rounded bg-black px-4 py-2 text-sm text-white">
-            Open →
+          <span className="mt-5 self-start font-mono text-xs text-accent-blue group-hover:underline">
+            open →
           </span>
-        </a>
+        </Link>
       </div>
     </main>
   );

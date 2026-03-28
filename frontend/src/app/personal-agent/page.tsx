@@ -1,54 +1,296 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   createPersonalAgentSession,
-  listPersonalMemories,
+  Persona,
   sendPersonalAgentMessage,
 } from "@/lib/api";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 type ChatMessage = {
   role: "user" | "agent";
   content: string;
 };
 
+type BadgeKind = "explicit" | "inferred" | "none";
+
+// ---------------------------------------------------------------------------
+// Markdown renderer
+// ---------------------------------------------------------------------------
+
+function renderMarkdown(text: string): React.ReactNode {
+  const lines = text.split("\n");
+  return lines.map((line, li) => {
+    const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+    const inline = parts.map((part, pi) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={pi}>{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith("*") && part.endsWith("*")) {
+        return <em key={pi}>{part.slice(1, -1)}</em>;
+      }
+      return <span key={pi}>{part}</span>;
+    });
+    return (
+      <span key={li}>
+        {inline}
+        {li < lines.length - 1 && <br />}
+      </span>
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Badge
+// ---------------------------------------------------------------------------
+
+function Badge({ kind }: { kind: BadgeKind }) {
+  if (kind === "none") return null;
+  const cls =
+    kind === "explicit"
+      ? "border border-green-800 text-accent-green"
+      : "border border-yellow-800 text-accent-orange";
+  return (
+    <span
+      className={`shrink-0 rounded px-2 py-0.5 font-mono text-[10px] tracking-widest ${cls}`}
+    >
+      {kind}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Field row
+// ---------------------------------------------------------------------------
+
+function FieldRow({
+  label,
+  value,
+  badge,
+  mono = false,
+}: {
+  label: string;
+  value: string | null | undefined;
+  badge: BadgeKind;
+  mono?: boolean;
+}) {
+  const empty = !value;
+  return (
+    <div className="flex items-center gap-3 py-2.5">
+      <span className="w-32 shrink-0 font-mono text-xs text-muted">{label}</span>
+      <span
+        className={[
+          "min-w-0 flex-1 text-sm",
+          empty ? "text-dim" : "text-primary",
+          mono ? "font-mono" : "",
+        ].join(" ")}
+      >
+        {empty ? "—" : mono ? (
+          <span className="rounded bg-surface px-1.5 py-0.5">{value}</span>
+        ) : value}
+      </span>
+      <Badge kind={empty ? "none" : badge} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section header
+// ---------------------------------------------------------------------------
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <p className="mb-1 mt-4 font-mono text-[10px] tracking-[0.2em] text-muted first:mt-0">
+      {label}
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live Profile Panel
+// ---------------------------------------------------------------------------
+
+const PERSONA_THRESHOLD = 0.7;
+
+function LiveProfilePanel({
+  persona,
+  completeness,
+  delta,
+}: {
+  persona: Persona;
+  completeness: number;
+  delta: Persona;
+}) {
+  const pct = Math.round(completeness * 100);
+  const ready = completeness >= PERSONA_THRESHOLD;
+
+  function badge(key: keyof Persona): BadgeKind {
+    const val = persona[key];
+    const empty =
+      val === undefined ||
+      val === null ||
+      val === "" ||
+      (Array.isArray(val) && val.length === 0);
+    if (empty) return "none";
+    return "explicit";
+  }
+
+  const interestsStr =
+    Array.isArray(persona.general_interests) && persona.general_interests.length > 0
+      ? (persona.general_interests as string[]).join(", ")
+      : null;
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Panel header */}
+      <div
+        className="flex shrink-0 items-center justify-between px-5 py-3"
+        style={{ borderBottom: "1px solid #1e2235" }}
+      >
+        <span className="font-mono text-xs tracking-[0.2em] text-muted">
+          LIVE PROFILE
+        </span>
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-accent-green" />
+          <span className="font-mono text-sm font-semibold text-accent-blue">
+            {pct}%
+          </span>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-5 pb-6">
+        {/* Completeness */}
+        <div className="mb-4 mt-4">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="font-mono text-xs text-muted">completeness</span>
+            <span className="font-mono text-sm font-semibold text-accent-blue">
+              {pct}%
+            </span>
+          </div>
+          <div
+            className="relative h-1.5 w-full overflow-hidden rounded-full"
+            style={{ background: "#1e2235" }}
+          >
+            <div
+              className="absolute inset-y-0 left-0 rounded-full bg-accent-blue transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+            <div
+              className="absolute inset-y-0 w-px bg-muted opacity-60"
+              style={{ left: "70%" }}
+            />
+          </div>
+          <p className="mt-1.5 font-mono text-[10px] text-muted">
+            threshold: 70%{" "}
+            {ready && (
+              <span className="text-accent-green">— profile ready ✓</span>
+            )}
+          </p>
+        </div>
+
+        <div className="mb-4" style={{ borderTop: "1px solid #1e2235" }} />
+
+        {/* IDENTITY */}
+        <SectionHeader label="IDENTITY" />
+        <FieldRow
+          label="name"
+          value={persona.name as string | undefined}
+          badge={badge("name")}
+        />
+        <FieldRow
+          label="home city"
+          value={persona.home_city as string | undefined}
+          badge={badge("home_city")}
+        />
+
+        <div className="my-3" style={{ borderTop: "1px solid #1e2235" }} />
+
+        {/* PREFERENCES */}
+        <SectionHeader label="PREFERENCES" />
+        <FieldRow
+          label="comm style"
+          value={persona.communication_style as string | undefined}
+          badge={badge("communication_style")}
+        />
+        <FieldRow
+          label="deal focus"
+          value={persona.deal_sensitivity as string | undefined}
+          badge={badge("deal_sensitivity")}
+        />
+
+        <div className="my-3" style={{ borderTop: "1px solid #1e2235" }} />
+
+        {/* INTERESTS */}
+        <SectionHeader label="INTERESTS" />
+        <FieldRow
+          label="categories"
+          value={interestsStr}
+          badge={badge("general_interests")}
+          mono
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
 export default function PersonalAgentPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [starting, setStarting] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [memories, setMemories] = useState<Array<{ id: string; content: string }>>(
-    [],
-  );
+
+  const [persona, setPersona] = useState<Persona>({});
+  const [completeness, setCompleteness] = useState(0);
+  const [lastDelta, setLastDelta] = useState<Persona>({});
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const bootstrap = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      const session = await createPersonalAgentSession();
+      setConversationId(session.conversation.id);
+      setPersona(session.persona ?? {});
+      setCompleteness(0);
+      setLastDelta({});
+      setMessages([{ role: "agent", content: session.agent_message.content }]);
+    } catch {
+      setError("Unable to connect to the backend. Is the server running?");
+    } finally {
+      setStarting(false);
+    }
+  };
 
   useEffect(() => {
-    const bootstrap = async () => {
-      try {
-        const session = await createPersonalAgentSession();
-        setConversationId(session.conversation.id);
-        setMessages([{ role: "agent", content: session.agent_message.content }]);
-      } catch {
-        setError("Unable to create personal agent session.");
-      }
-    };
     void bootstrap();
   }, []);
 
-  const canSend = useMemo(
-    () => Boolean(conversationId && input.trim().length > 0 && !loading),
-    [conversationId, input, loading],
-  );
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-  const refreshMemories = async () => {
-    try {
-      const data = await listPersonalMemories();
-      setMemories(data.memories ?? []);
-    } catch {
-      // best effort in phase 4
-    }
-  };
+  const canSend = useMemo(
+    () => Boolean(conversationId && input.trim().length > 0 && !loading && !starting),
+    [conversationId, input, loading, starting],
+  );
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -66,90 +308,146 @@ export default function PersonalAgentPage() {
         ...prev,
         { role: "agent", content: response.agent_message.content },
       ]);
-      await refreshMemories();
+      setPersona(response.persona);
+      setCompleteness(response.completeness_score);
+      setLastDelta(response.persona_delta);
     } catch {
-      setError("Failed to send message to Personal Agent.");
+      setError("Failed to send message.");
     } finally {
       setLoading(false);
     }
   };
 
+  const onReset = () => {
+    setConversationId(null);
+    setMessages([]);
+    setPersona({});
+    setCompleteness(0);
+    setLastDelta({});
+    void bootstrap();
+  };
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 p-6">
-      <header className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Personal Agent</h1>
-          <p className="text-gray-600">
-            Learns who you are — your name, city, communication style, and
-            general interests. Nothing about buying or selling.
-          </p>
-        </div>
-        <a href="/" className="rounded border px-3 py-1 text-sm text-gray-600 hover:bg-gray-50">
-          ← Home
-        </a>
-      </header>
-
-      {error ? (
-        <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
-
-      <section className="grid gap-6 md:grid-cols-[2fr_1fr]">
-        <div className="rounded border p-4">
-          <h2 className="mb-3 font-semibold">Chat</h2>
-          <div className="mb-4 h-96 space-y-2 overflow-y-auto rounded border bg-gray-50 p-3">
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`rounded p-2 text-sm ${
-                  message.role === "agent" ? "bg-white" : "bg-blue-50"
-                }`}
-              >
-                <strong className="mr-1 uppercase">{message.role}:</strong>
-                {message.content}
-              </div>
-            ))}
-          </div>
-
-          <form className="flex gap-2" onSubmit={onSubmit}>
-            <input
-              className="flex-1 rounded border px-3 py-2"
-              placeholder="e.g. My name is Alex and I live in Houston..."
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-            />
-            <button
-              type="submit"
-              disabled={!canSend}
-              className="rounded bg-black px-4 py-2 text-white disabled:opacity-40"
-            >
-              {loading ? "Sending..." : "Send"}
-            </button>
-          </form>
-        </div>
-
-        <aside className="rounded border p-4">
-          <h2 className="mb-3 font-semibold">Memory Panel</h2>
+    <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
+      {/* ------------------------------------------------------------------ */}
+      {/* LEFT — Chat panel                                                   */}
+      {/* ------------------------------------------------------------------ */}
+      <div
+        className="flex w-[55%] shrink-0 flex-col"
+        style={{ borderRight: "1px solid #1e2235" }}
+      >
+        {/* Chat header */}
+        <div
+          className="flex shrink-0 items-center gap-3 px-5 py-3"
+          style={{ borderBottom: "1px solid #1e2235" }}
+        >
+          <span className="font-mono text-xs tracking-[0.15em] text-muted">
+            PERSONAL AGENT / PROFILE BUILD
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-accent-green" />
+            <span className="font-mono text-xs text-muted">active</span>
+          </span>
           <button
-            onClick={() => void refreshMemories()}
-            className="mb-3 rounded border px-3 py-1 text-sm"
+            onClick={onReset}
+            disabled={starting}
+            className="ml-auto rounded border border-border-dark px-3 py-1 font-mono text-xs text-muted transition-colors hover:border-muted hover:text-primary disabled:opacity-40"
           >
-            Refresh
+            reset
           </button>
-          <div className="space-y-2">
-            {memories.length === 0 ? (
-              <p className="text-sm text-gray-500">No memories yet.</p>
-            ) : (
-              memories.map((memory) => (
-                <div key={memory.id} className="rounded bg-gray-50 p-2 text-sm">
-                  {memory.content}
-                </div>
-              ))
-            )}
+        </div>
+
+        {/* Error banner */}
+        {error && (
+          <div className="mx-4 mt-3 rounded border border-red-900 bg-red-950 px-4 py-2 font-mono text-xs text-red-400">
+            {error}
           </div>
-        </aside>
-      </section>
-    </main>
+        )}
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {starting && (
+            <p className="font-mono text-xs text-muted">Connecting…</p>
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} className="mb-4">
+              {msg.role === "user" ? (
+                <div className="flex flex-col items-end">
+                  <span className="mb-1 font-mono text-[10px] text-muted">
+                    you
+                  </span>
+                  <div
+                    className="max-w-[80%] rounded-lg px-4 py-2.5 text-sm leading-relaxed text-primary"
+                    style={{ background: "#1a2440" }}
+                  >
+                    {msg.content}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-start">
+                  <span className="mb-1 font-mono text-[10px] text-muted">
+                    agent
+                  </span>
+                  <div
+                    className="max-w-[90%] rounded-lg px-4 py-3 text-sm leading-relaxed text-primary"
+                    style={{ background: "#1c2030" }}
+                  >
+                    {renderMarkdown(msg.content)}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {loading && (
+            <div className="flex items-start">
+              <div
+                className="rounded-lg px-4 py-3 font-mono text-xs text-muted"
+                style={{ background: "#1c2030" }}
+              >
+                thinking…
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input bar */}
+        <form
+          onSubmit={onSubmit}
+          className="flex shrink-0 items-center gap-3 px-4 py-3"
+          style={{ borderTop: "1px solid #1e2235" }}
+        >
+          <input
+            className="flex-1 rounded-lg bg-card px-4 py-2.5 text-sm text-primary placeholder-muted outline-none ring-1 ring-border-dark transition-all focus:ring-accent-blue"
+            placeholder="Tell me about yourself…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={!conversationId || starting}
+          />
+          <button
+            type="submit"
+            disabled={!canSend}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-blue text-base font-bold transition-opacity disabled:opacity-30"
+            style={{ color: "#0d0f14" }}
+          >
+            →
+          </button>
+        </form>
+      </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* RIGHT — Live Profile panel                                          */}
+      {/* ------------------------------------------------------------------ */}
+      <div
+        className="flex min-w-0 flex-1 flex-col"
+        style={{ background: "#111420" }}
+      >
+        <LiveProfilePanel
+          persona={persona}
+          completeness={completeness}
+          delta={lastDelta}
+        />
+      </div>
+    </div>
   );
 }
