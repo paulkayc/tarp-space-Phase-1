@@ -313,6 +313,7 @@ export default function MandateAgentPage() {
   const [completeness, setCompleteness] = useState(0);
   const [lastDelta, setLastDelta] = useState<Record<string, unknown>>({});
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [mandateComplete, setMandateComplete] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -347,8 +348,8 @@ export default function MandateAgentPage() {
   }, [messages]);
 
   const canSend = useMemo(
-    () => Boolean(conversationId && input.trim().length > 0 && !loading && !starting),
-    [conversationId, input, loading, starting],
+    () => Boolean(conversationId && input.trim().length > 0 && !loading && !starting && !mandateComplete),
+    [conversationId, input, loading, starting, mandateComplete],
   );
 
   const onSubmit = async (event: FormEvent) => {
@@ -370,6 +371,9 @@ export default function MandateAgentPage() {
       setFlatState(response.mandate_state);
       setCompleteness(response.completeness_score);
       setLastDelta(response.mandate_delta as Record<string, unknown>);
+      if (response.mandate_complete) {
+        setMandateComplete(true);
+      }
     } catch {
       setError("Failed to send message.");
     } finally {
@@ -384,6 +388,7 @@ export default function MandateAgentPage() {
     setCompleteness(0);
     setLastDelta({});
     setProfileLoaded(false);
+    setMandateComplete(false);
     void bootstrap();
   };
 
@@ -427,6 +432,13 @@ export default function MandateAgentPage() {
             reset
           </button>
         </div>
+
+        {/* Completion banner */}
+        {mandateComplete && (
+          <div className="mx-4 mt-3 rounded border border-green-800 bg-green-950 px-4 py-2 font-mono text-xs text-green-400">
+            Mandate complete — hit <strong>reset</strong> to start a new one.
+          </div>
+        )}
 
         {/* Error banner */}
         {error && (
@@ -490,10 +502,10 @@ export default function MandateAgentPage() {
         >
           <input
             className="flex-1 rounded-lg bg-card px-4 py-2.5 text-sm text-primary placeholder-muted outline-none ring-1 ring-border-dark transition-all focus:ring-accent-blue"
-            placeholder="What are you looking for?"
+            placeholder={mandateComplete ? "Mandate complete — reset to start a new one" : "What are you looking for?"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={!conversationId || starting}
+            disabled={!conversationId || starting || mandateComplete}
           />
           <button
             type="submit"
