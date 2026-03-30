@@ -48,6 +48,9 @@ class FakeSession:
     def commit(self):
         return None
 
+    def flush(self):
+        return None
+
     def refresh(self, _obj):
         return None
 
