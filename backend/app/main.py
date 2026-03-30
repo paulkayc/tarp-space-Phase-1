@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from app.api.agents import router as agents_router
 from app.api.conversations import router as conversations_router
+from app.api.inventory import router as inventory_router
 from app.api.mandate_agent import router as mandate_agent_router
 from app.api.mandates import router as mandates_router
 from app.api.personal_agent import router as personal_agent_router
@@ -50,6 +51,7 @@ api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(users_router, prefix="/users", tags=["users"])
 api_v1.include_router(agents_router, prefix="/agents", tags=["agents"])
 api_v1.include_router(mandates_router, prefix="/mandates", tags=["mandates"])
+api_v1.include_router(inventory_router, prefix="/inventory", tags=["inventory"])
 api_v1.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
 api_v1.include_router(personal_agent_router, prefix="/personal-agent", tags=["personal-agent"])
 api_v1.include_router(mandate_agent_router, prefix="/mandate-agent", tags=["mandate-agent"])
